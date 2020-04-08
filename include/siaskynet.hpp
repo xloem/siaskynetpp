@@ -13,12 +13,12 @@ public:
 	};
 	static portal_options default_options;
 
-	struct upload {
+	struct upload_data {
 		std::string filename;
 		std::vector<uint8_t> data;
 
 		template <typename Data>
-		upload(std::string filename, Data const & data)
+		upload_data(std::string filename, Data const & data)
 		: filename(filename), data(std::begin(data), std::end(data))
 		{ }
 	};
@@ -43,15 +43,15 @@ public:
 	portal_options options;
 
 	response query(std::string const & skylink);
-	response read(std::string const & skylink);
+	response download(std::string const & skylink);
 
 	template <typename Data>
-	std::string write(Data const & data, std::string const & filename)
+	std::string upload(std::string const & filename, Data const & data)
 	{
-		return write(std::vector<uint8_t>(std::begin(data), std::end(data)), filename);
+		return upload(upload_data{filename, data});
 	}
-	std::string write(std::vector<uint8_t> const & data, std::string const & filename);
-	std::string write(std::vector<upload> const & files, std::string const & filename);
+	std::string upload(upload_data const & file);
+	std::string upload(std::string const & filename, std::vector<upload_data> const & files);
 };
 
 }

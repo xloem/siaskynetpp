@@ -7,7 +7,7 @@ set (SIASKYNETPP_INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/include CACHE INTERNAL
 
 add_subdirectory (dependencies)
 
-add_library (${SIASKYNETPP_LIBRARIES} source/siaskynetpp.cpp "${SIASKYNETPP_INCLUDE_DIRS}/siaskynet.hpp")
+add_library (${SIASKYNETPP_LIBRARIES} source/siaskynet.cpp "${SIASKYNETPP_INCLUDE_DIRS}/siaskynet.hpp")
 
 target_link_libraries (${SIASKYNETPP_LIBRARIES} ${CPR_LIBRARIES})
 target_include_directories (${SIASKYNETPP_LIBRARIES} PRIVATE ${JSON_INCLUDE_DIRS} PRIVATE ${CPR_INCLUDE_DIRS} PRIVATE ${SIASKYNETPP_INCLUDE_DIRS})

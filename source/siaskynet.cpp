@@ -7,7 +7,7 @@
 
 namespace sia {
 
-static std::string writeToField(std::vector<skynet::upload> const & files, std::string const & filename, std::string const & url, std::string const & field);
+static std::string uploadToField(std::vector<skynet::upload_data> const & files, std::string const & filename, std::string const & url, std::string const & field);
 static std::string trimSiaPrefix(std::string const & skylink);
 static std::string trimTrailingSlash(std::string const & url);
 static skynet::response::subfile parseCprResponse(cpr::Response & response);
@@ -45,29 +45,21 @@ std::string trimTrailingSlash(std::string const & url)
 	}
 }
 
-/*
-std::string skynet::write(std::string const & data, std::string const & filename)
-{
-	std::vector<uint8_t> bytes(data.begin(), data.end());
-	return write(bytes, filename);
-}
-*/
-
-std::string skynet::write(std::vector<uint8_t> const & data, std::string const & filename)
+std::string skynet::upload(upload_data const & file)
 {
 	auto url = cpr::Url{trimTrailingSlash(options.url) + trimTrailingSlash(options.uploadPath)};
 
-	return writeToField({upload{filename, data}}, filename, url, options.fileFieldname);
+	return uploadToField({file}, file.filename, url, options.fileFieldname);
 }
 
-std::string skynet::write(std::vector<skynet::upload> const & files, std::string const & filename)
+std::string skynet::upload(std::string const & filename, std::vector<skynet::upload_data> const & files)
 {
 	auto url = cpr::Url{trimTrailingSlash(options.url) + "/" + trimTrailingSlash(options.uploadPath)};
 
-	return writeToField(files, filename, url, options.directoryFileFieldname);
+	return uploadToField(files, filename, url, options.directoryFileFieldname);
 }
 
-std::string writeToField(std::vector<skynet::upload> const & files, std::string const & filename, std::string const & url, std::string const & field)
+std::string uploadToField(std::vector<skynet::upload_data> const & files, std::string const & filename, std::string const & url, std::string const & field)
 {
 	auto parameters = cpr::Parameters{{"filename", filename}};
 
@@ -100,7 +92,7 @@ skynet::response skynet::query(std::string const & skylink)
 	return result;
 }
 
-skynet::response skynet::read(std::string const & skylink)
+skynet::response skynet::download(std::string const & skylink)
 {
 	std::string url = trimTrailingSlash(options.url) + "/" + trimSiaPrefix(skylink);
 

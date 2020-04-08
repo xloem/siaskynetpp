@@ -8,15 +8,17 @@ int main()
 {
 	sia::skynet portal;
 
-	//auto skylink = portal.write("hello", "hello.txt");
-	auto skylink = portal.write({
-		{"hello.txt", "hello"},
-		{"world.txt", "world"}
-	}, "hello-folder");
+	//auto skylink = portal.upload("hello.txt", "hello");
+	auto skylink = portal.upload("hello-folder",
+		{
+			{"hello.txt", "hello"},
+			{"world.txt", "world"}
+		});
+
 	std::cout << skylink << std::endl;
 
-	//auto response = portal.read(skylink + "/hello.txt");
-	auto response = portal.read(skylink);
+	//auto response = portal.download(skylink + "/hello.txt");
+	auto response = portal.download(skylink);
 
 	std::cout << "skylink: " << response.skylink << std::endl;
 	std::cout << "filename: " << response.filename << std::endl;
