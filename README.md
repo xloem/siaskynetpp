@@ -1,8 +1,8 @@
 # siaskynetpp
-A C++ interface to Sia Skynet.  See https://siasky.net .
+A C++ interface to Sia Skynet, which is an interface to a strong decentralized file storage economy.  See https://siasky.net .
 
 ## Usage
-The interface is simple.  See example.cpp for example code.
+The interface is simple.  See [example code](example.cpp).
 
 To use this library without requiring its installation, include it as a submodule:
 ```
