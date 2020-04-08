@@ -2,7 +2,7 @@
 
 #include <iostream>
 
-void dump_metadata_hierarchy(sia::skynet::response::subfile & metadata, std::string indent = "");
+void dump_response(sia::skynet::response & response, bool content);
 
 int main()
 {
@@ -15,16 +15,21 @@ int main()
 			{"world.txt", "world"}
 		});
 
-	std::cout << skylink << std::endl;
+	std::cout << "hello-folder: " << skylink << std::endl;
 
 	//auto response = portal.download(skylink + "/hello.txt");
 	auto response = portal.download(skylink);
 
-	std::cout << "skylink: " << response.skylink << std::endl;
-	std::cout << "filename: " << response.filename << std::endl;
-	std::cout << "data: " << std::string(response.data.begin(), response.data.end()) << std::endl;
-	std::cout << "metadata: " << std::endl;
-	dump_metadata_hierarchy(response.metadata, "  ");
+	dump_response(response, true);
+
+	std::string example_filename = "siaskynetpp_example";
+	skylink = portal.upload_file(example_filename);
+	
+	std::cout << example_filename << ": " << skylink << std::endl;
+
+	response = portal.download_file(example_filename + ".fromskynet", skylink);
+
+	dump_response(response, false);
 
 	return 0;
 }
@@ -39,4 +44,15 @@ void dump_metadata_hierarchy(sia::skynet::response::subfile & metadata, std::str
 		std::cout << indent << file.first << std::endl;
 		dump_metadata_hierarchy(file.second, biggerindent);
 	}
+}
+
+void dump_response(sia::skynet::response & response, bool content)
+{
+	std::cout << "skylink: " << response.skylink << std::endl;
+	std::cout << "filename: " << response.filename << std::endl;
+	if (content) {
+		std::cout << "data: " << std::string(response.data.begin(), response.data.end()) << std::endl;
+	}
+	std::cout << "metadata: " << std::endl;
+	dump_metadata_hierarchy(response.metadata, "  ");
 }

@@ -44,6 +44,7 @@ public:
 
 	response query(std::string const & skylink);
 	response download(std::string const & skylink);
+	response download_file(std::string const & path, std::string const & skylink);
 
 	template <typename Data>
 	std::string upload(std::string const & filename, Data const & data)
@@ -52,6 +53,8 @@ public:
 	}
 	std::string upload(upload_data const & file);
 	std::string upload(std::string const & filename, std::vector<upload_data> const & files);
+	std::string upload_file(std::string const & path, std::string filename = "");
+	//TODO: void upload_directroy(std::string const & path);
 };
 
 }

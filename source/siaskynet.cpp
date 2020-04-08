@@ -3,10 +3,13 @@
 #include <cpr/cpr.h>
 #include <nlohmann/json.hpp>
 
-#include <iostream>
+#include <fstream>
 
 namespace sia {
 
+
+static void read_file(std::string const & path, std::vector<uint8_t> & buffer);
+static void write_file(std::string const & path, std::vector<uint8_t> const & buffer);
 static std::string uploadToField(std::vector<skynet::upload_data> const & files, std::string const & filename, std::string const & url, std::string const & field);
 static std::string trimSiaPrefix(std::string const & skylink);
 static std::string trimTrailingSlash(std::string const & url);
@@ -45,6 +48,27 @@ std::string trimTrailingSlash(std::string const & url)
 	}
 }
 
+std::string skynet::upload_file(std::string const & path, std::string filename)
+{
+	if (!filename.size()) {
+		filename = path;
+	}
+
+	upload_data data(filename, std::vector<uint8_t>());
+	read_file(path, data.data);
+
+	return upload(data);
+}
+
+/*
+void skynet::upload_directory(std::string const & path, std::string const & filename)
+{
+	if (!filename.size()) {
+		filename = path;
+	}
+}
+*/
+
 std::string skynet::upload(upload_data const & file)
 {
 	auto url = cpr::Url{trimTrailingSlash(options.url) + trimTrailingSlash(options.uploadPath)};
@@ -70,6 +94,12 @@ std::string uploadToField(std::vector<skynet::upload_data> const & files, std::s
 	}
 
 	auto response = cpr::Post(url, parameters, uploads);
+	if (response.error) {
+		throw std::runtime_error(response.error.message);
+	} else if (response.status_code != 200) {
+		throw std::runtime_error(response.text);
+	}
+	
 	auto json = nlohmann::json::parse(response.text);
 
 	std::string skylink = "sia://" + json["skylink"].get<std::string>();
@@ -82,6 +112,11 @@ skynet::response skynet::query(std::string const & skylink)
 	std::string url = trimTrailingSlash(options.url) + "/" + trimSiaPrefix(skylink);
 
 	auto response = cpr::Head(url);
+	if (response.error) {
+		throw std::runtime_error(response.error.message);
+	} else if (response.status_code != 200) {
+		throw std::runtime_error(response.text);
+	}
 
 	skynet::response result;
 	result.skylink = skylink;
@@ -92,12 +127,23 @@ skynet::response skynet::query(std::string const & skylink)
 	return result;
 }
 
+skynet::response skynet::download_file(std::string const & path, std::string const & skylink)
+{ 
+	response result = download(skylink);
+	
+	write_file(path, result.data);
+
+	return result;
+}
+
 skynet::response skynet::download(std::string const & skylink)
 {
 	std::string url = trimTrailingSlash(options.url) + "/" + trimSiaPrefix(skylink);
 
 	auto response = cpr::Get(url, cpr::Parameters{{"format","concat"}});
-	if (response.status_code != 200) {
+	if (response.error) {
+		throw std::runtime_error(response.error.message);
+	} else if (response.status_code != 200) {
 		throw std::runtime_error(response.text);
 	}
 
@@ -155,6 +201,32 @@ std::string extractContentDispositionFilename(std::string const & content_dispos
 	}
 
 	return { content_disposition.begin() + start, content_disposition.begin() + end };
+}
+
+static void read_file(std::string const & path, std::vector<uint8_t> & buffer)
+{
+	std::ifstream file(path.c_str(), std::ios::in | std::ios::binary | std::ios::ate);
+
+	if (!file.is_open()) { throw std::runtime_error("Failed to open " + path); }
+
+	std::streamsize size = file.tellg();
+	file.seekg(0, std::ios::beg);
+
+	buffer.resize(size);
+	file.read((char*)buffer.data(), size * sizeof(uint8_t) / sizeof(char));
+
+	if (file.fail()) { throw std::runtime_error("Failed to read contents of " + path); }
+}
+
+static void write_file(std::string const & path, std::vector<uint8_t> const & buffer)
+{
+	std::ofstream file(path.c_str(), std::ios::out | std::ios::binary);
+
+	if (!file.is_open()) { throw std::runtime_error("Failed to open " + path); }
+
+	file.write((char*)buffer.data(), buffer.size() * sizeof(uint8_t) / sizeof(char));
+
+	if (file.fail()) { throw std::runtime_error("Failed to write contents of " + path); }
 }
 
 }
