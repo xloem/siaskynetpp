@@ -1,0 +1,6 @@
+[submodule "external/cpr"]
+	path = dependencies/cpr
+	url = git@github.com:whoshuu/cpr.git
+[submodule "external/json"]
+	path = dependencies/json
+	url = git@github.com:nlohmann/json
