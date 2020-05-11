@@ -34,6 +34,7 @@ public:
 			std::string contenttype;
 			std::string filename;
 			size_t len;
+			size_t offset;
 			std::vector<std::pair<std::string, subfile>> subfiles;
 		} metadata;
 

@@ -34,15 +34,19 @@ int main()
 	return 0;
 }
 
-void dump_metadata_hierarchy(sia::skynet::response::subfile & metadata, std::string indent)
+void dump_metadata_hierarchy(sia::skynet::response & response, sia::skynet::response::subfile & metadata, std::string indent, bool content)
 {
 	std::cout << indent << "contenttype: " << metadata.contenttype << std::endl;
 	std::cout << indent << "filename: " << metadata.filename << std::endl;
 	std::cout << indent << "len: " << metadata.len << std::endl;
+	std::cout << indent << "offset: " << metadata.offset << std::endl;
+	if (content) {
+		std::cout << indent << "data: " << std::string(response.data.begin() + metadata.offset, response.data.begin() + metadata.offset + metadata.len) << std::endl;
+	}
 	auto biggerindent = indent + "  ";
 	for (auto & file : metadata.subfiles) {
 		std::cout << indent << file.first << std::endl;
-		dump_metadata_hierarchy(file.second, biggerindent);
+		dump_metadata_hierarchy(response, file.second, biggerindent, content);
 	}
 }
 
@@ -54,5 +58,5 @@ void dump_response(sia::skynet::response & response, bool content)
 		std::cout << "data: " << std::string(response.data.begin(), response.data.end()) << std::endl;
 	}
 	std::cout << "metadata: " << std::endl;
-	dump_metadata_hierarchy(response.metadata, "  ");
+	dump_metadata_hierarchy(response, response.metadata, "  ", content);
 }

@@ -15,7 +15,7 @@ static std::string trimSiaPrefix(std::string const & skylink);
 static std::string trimTrailingSlash(std::string const & url);
 static skynet::response::subfile parseCprResponse(cpr::Response & response);
 static std::string extractContentDispositionFilename(std::string const & content_disposition);
-static skynet::response::subfile parse_subfile(nlohmann::json const & value);
+static skynet::response::subfile parse_subfile(size_t & offset, nlohmann::json const & value);
 
 skynet::portal_options skynet::default_options = {
 	url: "https://siasky.net",
@@ -157,18 +157,24 @@ skynet::response skynet::download(std::string const & skylink)
 	return result;
 }
 
-skynet::response::subfile parse_subfile(nlohmann::json const & value)
+skynet::response::subfile parse_subfile(size_t & offset, nlohmann::json const & value)
 {
+	size_t suboffset = offset;
+
 	skynet::response::subfile metadata;
 	metadata.contenttype = value["contenttype"].get<std::string>();
-	//metadata.len = std::stoul(value["len"].get<std::string>());
 	metadata.len = value["len"].get<size_t>();
 	metadata.filename = value["filename"].get<std::string>();
+
+	metadata.offset = offset;
+	offset += metadata.len;
+
 	if (!value.contains("subfiles")) { return metadata; }
 
 	for (auto & subfile : value["subfiles"].items()) {
-		metadata.subfiles.emplace_back(subfile.key(), parse_subfile(subfile.value()));
+		metadata.subfiles.emplace_back(subfile.key(), parse_subfile(suboffset, subfile.value()));
 	}
+
 	return metadata;
 }
 
@@ -179,7 +185,8 @@ skynet::response::subfile parseCprResponse(cpr::Response & cpr)
 	parsed_json["len"] = std::stoul(cpr.header["content-length"]);
 	parsed_json["contenttype"] = cpr.header["content-type"];
 
-	return parse_subfile(parsed_json);
+	size_t offset = 0;
+	return parse_subfile(offset, parsed_json);
 }
 
 std::string extractContentDispositionFilename(std::string const & content_disposition)
