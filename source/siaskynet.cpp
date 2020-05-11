@@ -90,7 +90,7 @@ std::string uploadToField(std::vector<skynet::upload_data> const & files, std::s
 	cpr::Multipart uploads{};
 
 	for (auto & file : files) {
-		uploads.parts.emplace_back(field, cpr::Buffer{file.data.begin(), file.data.end(), file.filename});
+		uploads.parts.emplace_back(field, cpr::Buffer{file.data.begin(), file.data.end(), file.filename}, file.contenttype);
 	}
 
 	auto response = cpr::Post(url, parameters, uploads);

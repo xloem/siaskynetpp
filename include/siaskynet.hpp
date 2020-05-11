@@ -16,10 +16,11 @@ public:
 	struct upload_data {
 		std::string filename;
 		std::vector<uint8_t> data;
+		std::string contenttype;
 
 		template <typename Data>
-		upload_data(std::string filename, Data const & data)
-		: filename(filename), data(std::begin(data), std::end(data))
+		upload_data(std::string filename, Data const & data, std::string contenttype = {})
+		: filename(filename), data(std::begin(data), std::end(data)), contenttype(contenttype)
 		{ }
 	};
 
@@ -47,14 +48,14 @@ public:
 	response download_file(std::string const & path, std::string const & skylink);
 
 	template <typename Data>
-	std::string upload(std::string const & filename, Data const & data)
+	std::string upload(std::string const & filename, Data const & data, std::string const & contenttype = {})
 	{
-		return upload(upload_data{filename, data});
+		return upload(upload_data{filename, data, contenttype});
 	}
 	std::string upload(upload_data const & file);
 	std::string upload(std::string const & filename, std::vector<upload_data> const & files);
 	std::string upload_file(std::string const & path, std::string filename = "");
-	//TODO: void upload_directroy(std::string const & path);
+	//TODO: void upload_directory(std::string const & path);
 };
 
 }

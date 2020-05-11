@@ -12,7 +12,7 @@ int main()
 	auto skylink = portal.upload("hello-folder",
 		{
 			{"hello.txt", "hello"},
-			{"world.txt", "world"}
+			{"world.txt", "world", "text/example.type.sub-type+etc;mode=0640;owner=1000"}
 		});
 
 	std::cout << "hello-folder: " << skylink << std::endl;
