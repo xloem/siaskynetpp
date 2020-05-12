@@ -17,12 +17,19 @@ static skynet::response::subfile parseCprResponse(cpr::Response & response);
 static std::string extractContentDispositionFilename(std::string const & content_disposition);
 static skynet::response::subfile parse_subfile(size_t & offset, nlohmann::json const & value);
 
-skynet::portal_options skynet::default_options = {
-	url: "https://siasky.net",
-	uploadPath: "/skynet/skyfile",
-	fileFieldname: "file",
-	directoryFileFieldname: "files[]",
+skynet::portal_options skynet::default_options()
+{
+	return {
+		url: "https://siasky.net",
+		uploadPath: "/skynet/skyfile",
+		fileFieldname: "file",
+		directoryFileFieldname: "files[]"
+	};
 };
+
+skynet::skynet()
+: options(default_options())
+{ }
 
 skynet::skynet(skynet::portal_options const & options)
 : options(options)
@@ -111,11 +118,11 @@ skynet::response skynet::query(std::string const & skylink)
 {
 	std::string url = trimTrailingSlash(options.url) + "/" + trimSiaPrefix(skylink);
 
-	auto response = cpr::Head(url);
+	auto response = cpr::Head(url, cpr::Parameters{{"format","concat"}});
 	if (response.error) {
 		throw std::runtime_error(response.error.message);
 	} else if (response.status_code != 200) {
-		throw std::runtime_error(response.text);
+		throw std::runtime_error("HEAD request failed with status code " + std::to_string(response.status_code));
 	}
 
 	skynet::response result;
@@ -136,23 +143,47 @@ skynet::response skynet::download_file(std::string const & path, std::string con
 	return result;
 }
 
-skynet::response skynet::download(std::string const & skylink)
+skynet::response skynet::download(std::string const & skylink, std::initializer_list<std::pair<size_t, size_t>> ranges)
 {
+	skynet::response result;
 	std::string url = trimTrailingSlash(options.url) + "/" + trimSiaPrefix(skylink);
 
-	auto response = cpr::Get(url, cpr::Parameters{{"format","concat"}});
+	cpr::Header headers;
+	if (ranges.size()) {
+		std::string header_content;
+		bool first = true;
+		for (auto range: ranges) {
+			result.dataranges.emplace_back(range);
+			if (first) {
+				header_content += "bytes=";
+			} else {
+				header_content += ", ";
+			}
+			header_content += std::to_string(range.first) + "-" + std::to_string(range.first + range.second - 1);
+			first = false;
+		}
+		headers = cpr::Header{{"Range", header_content}};
+	}
+
+	auto response = cpr::Get(url, cpr::Parameters{{"format","concat"}}, headers);
 	if (response.error) {
 		throw std::runtime_error(response.error.message);
 	} else if (response.status_code != 200) {
-		throw std::runtime_error(response.text);
+		if (!ranges.size() || response.status_code != 206) {
+			throw std::runtime_error(response.text);
+		}
+	} else if (ranges.size()) {
+		throw std::runtime_error("Server does not support partial ranges.");
 	}
 
-	skynet::response result;
 	result.skylink = skylink;
 	result.portal = options;
 	result.filename = extractContentDispositionFilename(response.header["content-disposition"]);
 	result.metadata = parseCprResponse(response);
 	result.data = std::vector<uint8_t>(response.text.begin(), response.text.end());
+	if (!ranges.size()) {
+		result.dataranges.emplace_back(0, result.metadata.len);
+	}
 
 	return result;
 }

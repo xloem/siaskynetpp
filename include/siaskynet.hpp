@@ -11,7 +11,7 @@ public:
 		std::string fileFieldname;
 		std::string directoryFileFieldname;
 	};
-	static portal_options default_options;
+	static portal_options default_options();
 
 	struct upload_data {
 		std::string filename;
@@ -39,13 +39,15 @@ public:
 		} metadata;
 
 		std::vector<uint8_t> data;
+		std::vector<std::pair<size_t,size_t>> dataranges;
 	};
 
-	skynet(portal_options const & options = default_options);
+	skynet();
+	skynet(portal_options const & options);
 	portal_options options;
 
 	response query(std::string const & skylink);
-	response download(std::string const & skylink);
+	response download(std::string const & skylink, std::initializer_list<std::pair<size_t, size_t>> ranges = {});
 	response download_file(std::string const & path, std::string const & skylink);
 
 	template <typename Data>
