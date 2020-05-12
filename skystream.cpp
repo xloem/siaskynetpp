@@ -125,6 +125,7 @@ int main(int argc, char **argv)
 		metadata_json["content"]["identifiers"] = metadata_identifiers;
 		size_t depth = 0;
 		metadata_json.erase("lookup");
+		metadata_json.erase("sia-skynet-stream");
 
 		while (lookup_nodes.size() && lookup_nodes.back()["depth"] == depth) {
 			auto & back = lookup_nodes.back();
