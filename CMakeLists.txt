@@ -18,3 +18,7 @@ install (FILES include/siaskynet.hpp DESTINATION include)
 add_executable (siaskynetpp_example example.cpp)
 target_link_libraries (siaskynetpp_example ${SIASKYNETPP_LIBRARIES})
 target_include_directories (siaskynetpp_example PRIVATE ${SIASKYNETPP_INCLUDE_DIRS})
+
+add_executable (skystream skystream.cpp)
+target_link_libraries (skystream ${SIASKYNETPP_LIBRARIES} crypto)
+target_include_directories (skystream PRIVATE ${SIASKYNETPP_INCLUDE_DIRS} PRIVATE ${JSON_INCLUDE_DIRS})
