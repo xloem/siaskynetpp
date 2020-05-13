@@ -32,7 +32,7 @@ public:
 		if (span != "bytes" && offset != start_head) {
 			throw std::runtime_error(span + " " + std::to_string(offset) + " is within block span");
 		}
-		nlohmann::json spans = {
+		nlohmann::json spans = { // these are the spans of the new write
 			{"time", {{"start", time.first},{"end", time.second}}},
 			{"bytes", {{"start", start_bytes},{"end", start_bytes + full_size}}},
 			{"index", {{"start", index}, {"end", index + 1}}}
@@ -40,11 +40,56 @@ public:
 		nlohmann::json * tail;
 		try {
 		       	tail = &this->metadata(this->tail, "bytes", start_bytes + full_size);
-		} catch (std::out_of_range const & error) {
+		} catch (std::out_of_range const &) {
 			tail = &this->tail;
 		}
 
-		// TODO
+		nlohmann::json lookup_nodes;
+		size_t depth = 0;
+		nlohmann::json new_lookup_node;
+		lookup_nodes.clear();
+		try {
+			auto preceding = this->metadata(head, "index", index - 1);
+			new_lookup_node = preceding["content"];
+			lookup_nodes = preceding["lookup"];
+		} catch (std::out_of_range const &) { }
+
+		if (new_lookup_node) {
+			// 2B: we need to mutate new_lookup_node before using it
+			// it should have the right identifiers chunk (see 2C)
+			while (lookup_nodes.size() && lookup_nodes.back()["depth"] == depth) {
+				auto & back = lookup_nodes.back();
+				auto & back_spans = back["spans"];
+				for (auto & span : new_lookup_node["spans"].items()) {
+					auto start = back_spans[span.key()]["start"];
+					span.value()["start"] = start;
+				}
+				auto end = lookup_nodes.end();
+				-- end;
+				lookup_nodes.erase(end);
+
+				++ depth;
+			}
+			new_lookup_node["depth"] = depth;
+			lookup_nodes.emplace_back(new_lookup_node);
+		}
+
+		// 4: write the data out (also see 2B)
+		auto content_identifiers = cryptography.digests({&data});
+		nlohmann::json metadata_json = {
+			{"sia-skynet-stream", "1.0.10"},
+			{"content", {
+				{"spans", spans},
+				{"identifiers", content_identifiers},
+			}},
+			{"lookup", lookup_nodes}
+		};
+		std::string metadata_string = metadata_json.dump();
+
+		
+		// 5: update our tail link
+		// end: we can make a new tail metadata node that indexes everything afterward.  it can even have tree nodes if desired.
+
 	}
 
 	std::map<std::string,std::pair<double,double>> block_spans(std::string span, double offset)
@@ -104,8 +149,9 @@ public:
 	}
 
 private:
-	nlohmann::json & metadata(nlohmann::json & node, std::string span, double offset)
+	nlohmann::json & metadata(nlohmann::json & node, std::string span, double offset, nlohmann::json * identifiers_out = nullptr)
 	{
+		// 2C: make sure identifiers_out is written to with the checksums of the returned metadata [PROBLEM: if it is the node passed, we never have that; better cache them when downloaded]
 		auto content_span = node["content"]["spans"][span];
 		if (offset >= content_span["start"] && offset < content_span["end"]) {
 			return node;
