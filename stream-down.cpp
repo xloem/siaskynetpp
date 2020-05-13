@@ -171,9 +171,9 @@ private:
 int main(int argc, char **argv)
 {
 	skystream stream("skylink", argv[1]);
-	std::cerr << "Bytes: " << stream.length("bytes") << std::endl;
+	std::cerr << "Bytes: " << (unsigned long long)stream.length("bytes") << std::endl;
 	std::cerr << "Time: " << stream.length("time") << std::endl;
-	std::cerr << "Index: " << stream.length("index") << std::endl;
+	std::cerr << "Index: " << (unsigned long long)stream.length("index") << std::endl;
 
 	std::string span = "bytes";
 	auto range = stream.span(span);
