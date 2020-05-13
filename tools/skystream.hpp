@@ -4,16 +4,19 @@ class skystream
 {
 public:
 	skystream(std::string way, std::string link)
-	: tail(get_json({{way,link}}))
 	{
+		std::vector<uint8_t> data;
+		tail.metadata = get_json({{way,link}});
+		tail.identifiers = cryptography.digests({&data});
+		tail.identifiers[way] = link;
 	}
-	skystream(nlohmann::json metadata)
-	: tail(metadata)
+	skystream(nlohmann::json identifiers)
+	: tail{identifiers, get_json(identifiers)}
 	{ }
 
 	std::vector<uint8_t> read(std::string span, double offset)
 	{
-		auto metadata = this->metadata(tail, span, offset);
+		auto metadata = this->get_node(tail, span, offset).metadata;
 		double content_start = metadata["content"]["spans"][span]["start"];
 		if (span != "bytes" && offset != content_start) {
 			throw std::runtime_error(span + " " + std::to_string(offset) + " is within block span");
@@ -24,11 +27,11 @@ public:
 
 	void write(std::vector<uint8_t> & data, std::pair<double,double> time, std::string span, double offset)
 	{
-		auto head = this->metadata(this->tail, span, offset);
-		unsigned long long start_bytes = head["content"]["spans"]["bytes"]["start"];
-		double start_head = head["content"]["spans"][span]["start"];
+		auto head_node = this->get_node(this->tail, span, offset);
+		unsigned long long start_bytes = head_node.metadata["content"]["spans"]["bytes"]["start"];
+		double start_head = head_node.metadata["content"]["spans"][span]["start"];
 		auto full_size = data.size() + offset - start_head;
-		unsigned long long index = head["content"]["spans"]["index"]["start"];
+		unsigned long long index = head_node.metadata["content"]["spans"]["index"]["start"];
 		if (span != "bytes" && offset != start_head) {
 			throw std::runtime_error(span + " " + std::to_string(offset) + " is within block span");
 		}
@@ -37,11 +40,11 @@ public:
 			{"bytes", {{"start", start_bytes},{"end", start_bytes + full_size}}},
 			{"index", {{"start", index}, {"end", index + 1}}}
 		};
-		nlohmann::json * tail;
+		node * tail_node;
 		try {
-		       	tail = &this->metadata(this->tail, "bytes", start_bytes + full_size);
+		       	tail_node = &get_node(tail, "bytes", start_bytes + full_size);
 		} catch (std::out_of_range const &) {
-			tail = &this->tail;
+			tail_node = &tail;
 		}
 
 		nlohmann::json lookup_nodes;
@@ -49,9 +52,9 @@ public:
 		nlohmann::json new_lookup_node;
 		lookup_nodes.clear();
 		try {
-			auto preceding = this->metadata(head, "index", index - 1);
-			new_lookup_node = preceding["content"];
-			lookup_nodes = preceding["lookup"];
+			auto preceding = this->get_node(head_node, "index", index - 1);
+			new_lookup_node = preceding.metadata["content"];
+			lookup_nodes = preceding.metadata["lookup"];
 		} catch (std::out_of_range const &) { }
 
 		if (new_lookup_node) {
@@ -94,7 +97,7 @@ public:
 
 	std::map<std::string,std::pair<double,double>> block_spans(std::string span, double offset)
 	{
-		auto metadata = this->metadata(tail, span, offset);
+		auto metadata = this->get_node(tail, span, offset).metadata;
 		std::map<std::string,std::pair<double,double>> result;
 		for (auto & content_span : metadata["content"]["spans"].items()) {
 			auto span = content_span.key();
@@ -112,12 +115,12 @@ public:
 	std::map<std::string,std::pair<double,double>> spans()
 	{
 		std::map<std::string,std::pair<double,double>> result;
-		for (auto & content_span : tail["content"]["spans"].items()) {
+		for (auto & content_span : tail.metadata["content"]["spans"].items()) {
 			auto span = content_span.key();
 			result[span].second = content_span.value()["end"];
 			result[span].first = content_span.value()["start"];
 		}
-		for (auto & lookup : tail["lookup"]) {
+		for (auto & lookup : tail.metadata["lookup"]) {
 			for (auto & lookup_span : lookup["spans"].items()) {
 				auto span = lookup_span.key();
 				double point = lookup_span.value()["start"];
@@ -149,14 +152,20 @@ public:
 	}
 
 private:
-	nlohmann::json & metadata(nlohmann::json & node, std::string span, double offset, nlohmann::json * identifiers_out = nullptr)
+	struct node
 	{
-		// 2C: make sure identifiers_out is written to with the checksums of the returned metadata [PROBLEM: if it is the node passed, we never have that; better cache them when downloaded]
-		auto content_span = node["content"]["spans"][span];
+		nlohmann::json identifiers;
+		nlohmann::json metadata;
+	};
+
+	node & get_node(node & start, std::string span, double offset)
+	{
+		// WIP: refactoring slightly, done when compiles & runs
+		auto content_span = start.metadata["content"]["spans"][span];
 		if (offset >= content_span["start"] && offset < content_span["end"]) {
-			return node;
+			return start;
 		}
-		for (auto & lookup : node["lookup"]) {
+		for (auto & lookup : start.metadata["lookup"]) {
 			auto lookup_span = lookup["spans"][span];
 			double start = lookup_span["start"];
 			double end = lookup_span["end"];
@@ -164,17 +173,19 @@ private:
 				auto identifiers = lookup["identifiers"];
 				std::string identifier = identifiers.begin().value();
 				if (!cache.count(identifier)) {
-					cache[identifier] = get_json(identifiers);
+					cache[identifier] = node{identifiers, get_json(identifiers)};
 				}
-				return metadata(cache[identifier], span, offset);
+				return get_node(cache[identifier], span, offset);
 			}
 		}
 		throw std::out_of_range(span + " " + std::to_string(offset) + " out of range");
 	}
 
-	nlohmann::json get_json(nlohmann::json identifiers)
+	nlohmann::json get_json(nlohmann::json identifiers, std::vector<uint8_t> * data = nullptr)
 	{
-		auto result = nlohmann::json::parse(get(identifiers));
+		auto data_result = get(identifiers);
+		if (data) { *data = data_result; }
+		auto result = nlohmann::json::parse(data_result);
 		// TODO improve (refactor?), hardcodes storage system and slow due to 2 requests for each chunk
 		std::string skylink = identifiers["skylink"];
 		skylink.resize(52); skylink += "/content";
@@ -208,6 +219,6 @@ private:
 
 	sia::skynet portal;
 	crypto cryptography;
-	nlohmann::json tail;
-	std::unordered_map<std::string, nlohmann::json> cache;
+	node tail;
+	std::unordered_map<std::string, node> cache;
 };
