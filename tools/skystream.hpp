@@ -54,12 +54,11 @@ public:
 		try {
 			auto preceding = this->get_node(head_node, "index", index - 1);
 			new_lookup_node = preceding.metadata["content"];
+			new_lookup_node["identifiers"] = preceding.identifiers;
 			lookup_nodes = preceding.metadata["lookup"];
 		} catch (std::out_of_range const &) { }
 
 		if (new_lookup_node) {
-			// 2B: we need to mutate new_lookup_node before using it
-			// it should have the right identifiers chunk (see 2C)
 			while (lookup_nodes.size() && lookup_nodes.back()["depth"] == depth) {
 				auto & back = lookup_nodes.back();
 				auto & back_spans = back["spans"];
@@ -80,7 +79,7 @@ public:
 		// 4: write the data out (also see 2B)
 		auto content_identifiers = cryptography.digests({&data});
 		nlohmann::json metadata_json = {
-			{"sia-skynet-stream", "1.0.10"},
+			{"sia-skynet-stream", "1.0.10_debugging"},
 			{"content", {
 				{"spans", spans},
 				{"identifiers", content_identifiers},
@@ -88,6 +87,26 @@ public:
 			{"lookup", lookup_nodes}
 		};
 		std::string metadata_string = metadata_json.dump();
+
+		sia::skynet::upload_data metadata_upload("metadata.json", std::vector<uint8_t>{metadata_string.begin(), metadata_string.end()}, "application/json");
+		sia::skynet::upload_data content("content", data, "application/octet-stream");
+
+		auto metadata_identifiers = cryptography.digests({&metadata_upload.data});
+
+		std::string skylink;
+		while (true) {
+			try {
+				skylink = portal.upload(metadata_identifiers["sha3_12"], {metadata_upload, content});
+				break;
+			} catch(std::runtime_error const & e) {
+				std::cerr << e.what() << std::endl;
+				continue;
+			}
+		}
+		metadata_identifiers["skylink"] = skylink + "/" + metadata_upload.filename;
+
+
+		// 4B: note we need to provide a node for our metadata, after upload
 
 		
 		// 5: update our tail link
@@ -160,7 +179,6 @@ private:
 
 	node & get_node(node & start, std::string span, double offset)
 	{
-		// WIP: refactoring slightly, done when compiles & runs
 		auto content_span = start.metadata["content"]["spans"][span];
 		if (offset >= content_span["start"] && offset < content_span["end"]) {
 			return start;
@@ -186,7 +204,7 @@ private:
 		auto data_result = get(identifiers);
 		if (data) { *data = data_result; }
 		auto result = nlohmann::json::parse(data_result);
-		// TODO improve (refactor?), hardcodes storage system and slow due to 2 requests for each chunk
+		// TODO improve (refactor?), hardcodes storage system and is slow due to 2 requests for each chunk
 		std::string skylink = identifiers["skylink"];
 		skylink.resize(52); skylink += "/content";
 		result["content"]["identifiers"]["skylink"] = skylink;
