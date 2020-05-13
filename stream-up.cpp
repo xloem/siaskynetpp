@@ -89,7 +89,7 @@ int main(int argc, char **argv)
 	content.data.resize(content.data.capacity());
 
 	nlohmann::json metadata_json{
-		{"sia-skynet-stream", "1.0.7"}
+		{"sia-skynet-stream", "1.0.9"}
 	};
 
 	std::vector<nlohmann::json> lookup_nodes; // roots and spans to use to seek stream history
@@ -100,16 +100,14 @@ int main(int argc, char **argv)
 			perror("read");
 			return size;
 		}
-		auto content_identifiers = cryptography.digests({&content.data});
-		//content_identifiers["skylink"] = content.filename;
-		//content.filename = content_sha3_512;
 		content.data.resize(size);
+		auto content_identifiers = cryptography.digests({&content.data});
 
 		metadata_json["content"] = {
 			{"spans", {
-				{"time", {{"start", start_time}, {"end", end_time}, {"length", end_time - start_time}}},
-				{"bytes", {{"start", offset}, {"end", offset + size}, {"length", size}}},
-				{"index", {{"start", index},{"end", index}, {"length", 0}}}
+				{"time", {{"start", start_time}, {"end", end_time}}},
+				{"bytes", {{"start", offset}, {"end", offset + size}}},
+				{"index", {{"start", index}, {"end", index + 1}}}
 			}},
 			{"identifiers", content_identifiers}
 		};
@@ -140,7 +138,6 @@ int main(int argc, char **argv)
 			for (auto & span : new_lookup_node["spans"].items()) {
 				auto start = back_spans[span.key()]["start"];
 				span.value()["start"] = start;
-				span.value()["length"] = (double)span.value()["end"] - (double)start;
 			}
 			lookup_nodes.pop_back();
 			++ depth;
@@ -159,6 +156,6 @@ int main(int argc, char **argv)
 		*/
 		content.data.resize(content.data.capacity());
 	}
-	std::cout << lookup_nodes.back()["content"]["identifiers"].dump(2) << std::endl;
+	std::cout << lookup_nodes.back()["identifiers"].dump(2) << std::endl;
 	return 0;
 }
