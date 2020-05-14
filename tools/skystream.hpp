@@ -61,10 +61,6 @@ public:
 	{
 		seconds_t end_time = time();
 		seconds_t start_time = tail.metadata["content"]["spans"]["time"]["end"];
-
-		// flags are set if this change splits existing blocks of data into parts
-		bool head_is_sliced = false;
-		bool tail_is_sliced = false;
 		
 		node head_node;
 		nlohmann::json head_bounds;
@@ -85,7 +81,6 @@ public:
 				if (span != "bytes") {
 					throw std::runtime_error(span + " " + std::to_string(offset) + " is within block span");
 				} else {
-					head_is_sliced = true;
 					start_bytes = offset;
 					for (auto bound : head_node_content["bounds"].items()) {
 						if (bound.key() == "bytes") {
@@ -110,7 +105,6 @@ public:
 		       	tail_node = &get_node(tail, "bytes", end_bytes);
 			auto tail_node_content = tail_node->metadata["content"];
 			if (end_bytes != tail_node_content["bounds"]["bytes"]["start"]) {
-				tail_is_sliced = true;
 				for (auto bound : tail_node_content["bounds"].items()) {
 						if (bound.key() == "bytes") {
 							tail_bounds["bytes"] = {{"start", end_bytes},{"end", bound.value()["end"]}};
@@ -134,6 +128,8 @@ public:
 			lookup_nodes = preceding.metadata["lookup"];
 		} catch (std::out_of_range const &) { }
 
+		// 8: we have a new way of merging lookup nodes.  we merge all adjacent pairs with equal depth, repeatedly.
+		// this means below algorithm should change to add new_lookup_node first, and then merge after adding.
 		if (new_lookup_node) {
 			while (lookup_nodes.size() && lookup_nodes.back()["depth"] == depth) {
 				auto & back = lookup_nodes.back();
@@ -151,8 +147,24 @@ public:
 			new_lookup_node["depth"] = depth;
 			lookup_nodes.emplace_back(new_lookup_node);
 		}
-		// 7: our upload should become our new tail.  we don't need to upload a new metadata doc.  we just need to put more things in the lookup nodes.
-			// 6: although typos and disorganization, we now have [head/tail]_is_sliced and [head/tail]_bounds set to new bounds json if true
+
+
+		// end: we can make a new tail metadata node that indexes everything afterward.  it can even have tree nodes if desired.
+		// 5: remaining before testing: build lookup nodes using three more sources in 1-2-3 order
+		//  1. if !head_bounds.is_null(), then add a lookup reference for head
+			// note: we can't merge this lookup node with previous because it is the only one with a link to its content.
+		if (!head_bounds.is_null()) {
+			lookup_nodes.emplace_back(nlohmann::json{
+				{"identifiers", head_node.identifiers},
+				{"spans", head_bounds},
+				{"depth", 0} // now .... will this get merged if we append to tail after this?
+						// when appending we assuming depth reduces forward, which is no longer true.
+						// we probably want to reduce depth within as well as forward.
+			});
+		}
+
+		//  2. if !tail_bounds.is_null(), then add a lookup reference for tail
+		//  3. reference node hierarchies until real tail to complete reference to rest of doc
 
 		auto content_identifiers = cryptography.digests({&data});
 		nlohmann::json metadata_json = {
@@ -185,24 +197,9 @@ public:
 		}
 		metadata_identifiers["skylink"] = skylink + "/" + metadata_upload.filename;
 
-		if (!head_node.identifiers) {
-			// this is a simple append
-			tail.identifiers = metadata_identifiers;
-			tail.metadata = metadata_json;
-		} else {
-			// TODO: re-use existing data by respecting high level span bounds when descending documents,
-			//       rather than reuploading chunks.
-			// we are writing in the middle of the stream.  this will make a fork.
-			// 5: update our tail link
-			//	5A: reference old tail links to reuse data after our edit
-			//	5B: reference the overlapping tail link with a limited span
-			//	5C: figure out how to handle the content documents that overlap with the start and end of our write
-			//		so, at the start, we'll want to just include that document in our lookup list, with proper bounds adjusted.
-			//		same at the end.  so we want to preserve both of those documents.  and we don't want to mutate them until after the upload,
-			//		so that if the upload throws an error or halts the system there is more consistency.
-
-			// end: we can make a new tail metadata node that indexes everything afterward.  it can even have tree nodes if desired.
-		}
+		// if we want to supporto threading we'll likely need a lock around this whole function (not just the change to tail)
+		tail.identifiers = metadata_identifiers;
+		tail.metadata = metadata_json;
 	}
 
 	std::map<std::string,std::pair<double,double>> block_spans(std::string span, double offset)
