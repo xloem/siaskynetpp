@@ -24,11 +24,14 @@ public:
 		tail.metadata = {
 			{"content", {
 				{"spans",{
-					{"time", {"start", time()}, {"end", time()}},
-					{"index", {"start", 0}, {"end", 0}},
-					{"bytes", {"start", 0}, {"end", 0}}
+					//{"real", {
+						{"time", {"start", time()}, {"end", time()}},
+						{"index", {"start", 0}, {"end", 0}},
+						{"bytes", {"start", 0}, {"end", 0}}
+					//}}
 				}}
-			}}
+			}}//,
+			//{"flows", {}}
 		};
 	}
 	skystream(std::string way, std::string link)
@@ -42,7 +45,7 @@ public:
 	: tail{identifiers, get_json(identifiers)}
 	{ }
 
-	std::vector<uint8_t> read(std::string span, double offset)
+	std::vector<uint8_t> read(std::string span, double offset, std::string flow = "real")
 	{
 		auto metadata = this->get_node(tail, span, offset).metadata;
 		auto metadata_content = metadata["content"];
@@ -120,33 +123,99 @@ public:
 		nlohmann::json lookup_nodes;
 		size_t depth = 0;
 		nlohmann::json new_lookup_node;
+		node preceding;
 		lookup_nodes.clear();
 		try {
-			auto preceding = this->get_node(tail, "bytes", start_bytes - 1);
+			preceding = this->get_node(tail, "bytes", start_bytes - 1); // preceding 
 			new_lookup_node = preceding.metadata["content"];
 			new_lookup_node["identifiers"] = preceding.identifiers;
-			lookup_nodes = preceding.metadata["lookup"];
+			new_lookup_node["depth"] = 0;
+			lookup_nodes = preceding.metadata["lookup"]; // everything in lookup nodes is accessibel via preceding's identifiers
+			lookup_nodes.emplace_back(new_lookup_node);
 		} catch (std::out_of_range const &) { }
 
 		// 8: we have a new way of merging lookup nodes.  we merge all adjacent pairs with equal depth, repeatedly.
 		// this means below algorithm should change to add new_lookup_node first, and then merge after adding.
-		if (new_lookup_node) {
-			while (lookup_nodes.size() && lookup_nodes.back()["depth"] == depth) {
-				auto & back = lookup_nodes.back();
-				auto & back_spans = back["spans"];
-				for (auto & span : new_lookup_node["spans"].items()) {
-					auto start = back_spans[span.key()]["start"];
-					span.value()["start"] = start;
-				}
-				auto end = lookup_nodes.end();
-				-- end;
-				lookup_nodes.erase(end);
+		for (size_t index = 0; index < lookup_nodes.size() - 1;) {
+			auto & current_node = lookup_nodes[index];
+			auto & next_node = lookup_nodes[index + 1];
+			if (current_node["depth"] == next_node["depth"]) {
+				auto next_spans = next_node["spans"];
+				for (auto & span : current_node["spans"].items()) {
+					auto & current_span = span.value();
+					auto & next_span = next_spans[span.key()];
+					// 10: we're changing the format to use "flows" of "real" and "logic" as below
+					// 		[this change is at the edge of checks for likely-to-finish-task.  this is known.
+					// 		 so, no more generalization until something is working and usable.]
+					// 		[ETA for completion has doubled.]
+					// 			[we have other tasks we want to do.]
+					// 				[considering undoing proposed change.]
+					// 					[okay, demand-to-make-more-general: you don't seem to have the capacity to support
+					// 					 that.  i am forcing you to not have it be more general.]
+					// 		[we will implement a test before changing further.  thank you all for the relation.]
+					// {
+					//	'sia-skynet-stream': "1.1.0_debugging",
+					// 	content: {
+					// 		identifiers: {important-stuff},
+					// 		spans: {
+					// 			{real: {time:}},
+					// 			{logic: {bytes:,index:}}
+					// 		}
+					//	},
+					//	flows: { // 'lookup' gets translated to 'flows'
+					//		real: [
+					//			{
+					//				identifiers: {important-stuff},
+					//	 			spans: {
+					//	 				{real: {time:}},
+					//	 				{logic: {bytes:,index:}}
+					//	 			}
+					//			}, ...
+					//		], // we're considering updating this to not store multiple copies of the lookup data for each order.
+					//		   // but we're noting with logic-space changes, the trees may refer to different nodes.  maybe leave for later.
+					//		   	// for streams, reuse is helpful.
+					//		logic: [
+					//			{
+					//				identifiers: {important-stuff},
+					//	 			spans: {
+					//	 				{real: {time:}},
+					//	 				{logic: {bytes:,index:}}
+					//	 			}
+					//			}, ...
+					//		]
+					//	}
+					//}     
 
-				++ depth;
+					// NOTE: we need to update identifiers of lookup_nodes to point to something that contains both
+						    		
+					auto & current_end = current_span["end"];
+					auto & next_end = next_span["end"];
+					assert (current_end == next_span["start"]);
+					if (current_end < next_end) { current_end = next_end; }
+				}
+				current_node["identifiers"] = preceding.identifiers;
+				current_node["depth"] = (unsigned long long)current_node["depth"] + 1;
+				lookup_nodes.erase(index + 1);
+			} else {
+				++ index;
 			}
-			new_lookup_node["depth"] = depth;
-			lookup_nodes.emplace_back(new_lookup_node);
 		}
+		// 9: this is old implementation, below loop.  9: above loop is wip new implementation
+		/*
+		while (lookup_nodes.size() && lookup_nodes.back()["depth"] == depth) {
+			auto & back = lookup_nodes.back();
+			auto & back_spans = back["spans"];
+			for (auto & span : new_lookup_node["spans"].items()) {
+				auto start = back_spans[span.key()]["start"];
+				span.value()["start"] = start;
+			}
+			auto end = lookup_nodes.end();
+			-- end;
+			lookup_nodes.erase(end);
+
+			++ depth;
+		}
+		*/
 
 
 		// end: we can make a new tail metadata node that indexes everything afterward.  it can even have tree nodes if desired.
@@ -173,6 +242,12 @@ public:
 				{"spans", spans},
 				{"identifiers", content_identifiers},
 			}},
+			/* 10:
+			{"flow", { 
+				{"logical", lookup_nodes},
+				{"creation", append_only_lookup_nodes_of_time_and_index}
+			}},
+			*/
 			{"lookup", lookup_nodes}
 		};
 		std::string metadata_string = metadata_json.dump();
@@ -334,6 +409,11 @@ private:
 			}
 		}
 		return result;
+	}
+
+	nlohmann::json lookup_nodes(node & source, nlohmann::json & bounds)
+	{
+		// to do this right, consider that source's content may be in the middle of its lookups.  so you want to put it in the right spot.
 	}
 
 	sia::skynet portal;
