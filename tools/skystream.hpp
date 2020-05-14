@@ -1,6 +1,8 @@
 #pragma once
 
 #include <chrono>
+// iostreams for debug
+#include <iostream>
 
 #include <nlohmann/json.hpp>
 
@@ -25,9 +27,9 @@ public:
 			{"content", {
 				{"spans",{
 					//{"real", {
-						{"time", {"start", time()}, {"end", time()}},
-						{"index", {"start", 0}, {"end", 0}},
-						{"bytes", {"start", 0}, {"end", 0}}
+						{"time", {{"start", time()}, {"end", time()}}},
+						{"index", {{"start", 0}, {"end", 0}}},
+						{"bytes", {{"start", 0}, {"end", 0}}}
 					//}}
 				}}
 			}}//,
@@ -105,7 +107,7 @@ public:
 		node * tail_node;
 		nlohmann::json tail_bounds;
 		try {
-		       	tail_node = &get_node(tail, "bytes", end_bytes);
+			tail_node = &get_node(tail, "bytes", end_bytes);
 			auto tail_node_content = tail_node->metadata["content"];
 			if (end_bytes != tail_node_content["bounds"]["bytes"]["start"]) {
 				for (auto bound : tail_node_content["bounds"].items()) {
@@ -120,23 +122,23 @@ public:
 			tail_node = &tail;
 		}
 
-		nlohmann::json lookup_nodes;
+		nlohmann::json lookup_nodes = nlohmann::json::array();
 		size_t depth = 0;
 		nlohmann::json new_lookup_node;
 		node preceding;
 		lookup_nodes.clear();
-		try {
+		if (start_bytes > 0) { try {
 			preceding = this->get_node(tail, "bytes", start_bytes - 1); // preceding 
 			new_lookup_node = preceding.metadata["content"];
 			new_lookup_node["identifiers"] = preceding.identifiers;
 			new_lookup_node["depth"] = 0;
-			lookup_nodes = preceding.metadata["lookup"]; // everything in lookup nodes is accessibel via preceding's identifiers
+			lookup_nodes = preceding.metadata["lookup"]; // everything in lookup nodes is accessible via preceding's identifiers
 			lookup_nodes.emplace_back(new_lookup_node);
-		} catch (std::out_of_range const &) { }
+		} catch (std::out_of_range const &) { } }
 
 		// 8: we have a new way of merging lookup nodes.  we merge all adjacent pairs with equal depth, repeatedly.
 		// this means below algorithm should change to add new_lookup_node first, and then merge after adding.
-		for (size_t index = 0; index < lookup_nodes.size() - 1;) {
+		for (size_t index = 0; index + 1 < lookup_nodes.size();) {
 			auto & current_node = lookup_nodes[index];
 			auto & next_node = lookup_nodes[index + 1];
 			if (current_node["depth"] == next_node["depth"]) {
@@ -184,10 +186,10 @@ public:
 					//			}, ...
 					//		]
 					//	}
-					//}     
+					//}
 
 					// NOTE: we need to update identifiers of lookup_nodes to point to something that contains both
-						    		
+
 					auto & current_end = current_span["end"];
 					auto & next_end = next_span["end"];
 					assert (current_end == next_span["start"]);
@@ -251,6 +253,7 @@ public:
 			{"lookup", lookup_nodes}
 		};
 		std::string metadata_string = metadata_json.dump();
+		std::cerr << metadata_string << std::endl;
 
 		sia::skynet::upload_data metadata_upload("metadata.json", std::vector<uint8_t>{metadata_string.begin(), metadata_string.end()}, "application/json");
 		sia::skynet::upload_data content("content", data, "application/octet-stream");
@@ -263,7 +266,7 @@ public:
 		std::string skylink;
 		while (true) {
 			try {
-				skylink = portal.upload(metadata_identifiers["sha3_12"], {metadata_upload, content});
+				skylink = portal.upload(metadata_identifiers["sha3_512"], {metadata_upload, content});
 				break;
 			} catch(std::runtime_error const & e) {
 				std::cerr << e.what() << std::endl;
@@ -331,6 +334,11 @@ public:
 	double length(std::string span)
 	{
 		return lengths()[span];
+	}
+
+	nlohmann::json identifiers()
+	{
+		return tail.identifiers;
 	}
 
 private:
