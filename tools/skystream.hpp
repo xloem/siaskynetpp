@@ -239,7 +239,7 @@ public:
 
 		auto content_identifiers = cryptography.digests({&data});
 		nlohmann::json metadata_json = {
-			{"sia-skynet-stream", "1.0.10_debugging"},
+			{"sia-skynet-stream", "1.0.10"},
 			{"content", {
 				{"spans", spans},
 				{"identifiers", content_identifiers},
