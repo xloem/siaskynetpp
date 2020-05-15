@@ -8,6 +8,7 @@ void dump_response(sia::skynet::response & response, bool content);
 int main()
 {
 	sia::skynet portal;
+	std::cout << "portal: " << portal.options.url << std::endl;
 
 	//auto skylink = portal.upload("hello.txt", "hello");
 	auto skylink = portal.upload("hello-folder",

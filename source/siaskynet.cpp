@@ -19,13 +19,30 @@ static skynet::response::subfile parse_subfile(size_t & offset, nlohmann::json c
 
 skynet::portal_options skynet::default_options()
 {
-	return {
-		url: "https://siasky.net",
-		uploadPath: "/skynet/skyfile",
-		fileFieldname: "file",
-		directoryFileFieldname: "files[]"
-	};
+	return portals().front();
 };
+
+std::vector<skynet::portal_options> skynet::portals()
+{
+	std::vector<skynet::portal_options> result;
+	auto response = cpr::Get(cpr::Url{"https://siastats.info/dbs/skynet_current.json"});
+	std::string text;
+	if (response.error || response.status_code != 200) {
+		// retrieved 2020-05-14
+		text = R"([{"name":"SiaSky.net","files":[392823,7449,382702,5609],"size":[2.55,0.11,2.3,0.09],"link":"https://siasky.net","chartColor":"#666","version":"1.4.8-master","gitrevision":"a54efe103"},{"name":"SiaCDN.com","files":[659977],"size":[2.65],"link":"https://www.siacdn.com","chartColor":"#666","version":"1.4.8-master","gitrevision":"d47625aac"},{"name":"SkynetHub.io","files":[5408,0],"size":[0.04,0],"link":"https://skynethub.io","chartColor":"#666","version":"1.4.8-master","gitrevision":"ca21c97fc"},{"name":"SiaLoop.net","files":[40979],"size":[0.18],"link":"https://sialoop.net","chartColor":"#666","version":"1.4.7","gitrevision":"000eccb45"},{"name":"SkyDrain.net","files":[42242,914],"size":[0.23,0.04],"link":"https://skydrain.net","chartColor":"#666","version":"1.4.8","gitrevision":"1eb685ba8"},{"name":"Tutemwesi.com","files":[73918],"size":[0.32],"link":"https://skynet.tutemwesi.com","chartColor":"#666","version":"1.4.6-master","gitrevision":"c2a4d83"},{"name":"Luxor.tech","files":[21754],"size":[0.11],"link":"https://skynet.luxor.tech","chartColor":"#666","version":"1.4.5-master","gitrevision":"e1b995f"},{"name":"LightspeedHosting.com","files":[0],"size":[0],"link":"https://vault.lightspeedhosting.com","chartColor":"#666","version":"","gitrevision":""},{"name":"UTXO.no","files":[0],"size":[0],"link":"https://skynet.utxo.no","chartColor":"#666","version":"","gitrevision":""},{"name":"SkyPortal.xyz","files":[22858,0],"size":[0.14,0],"link":"https://skyportal.xyz","chartColor":"#666","version":"1.4.8","gitrevision":"1eb685ba8"}])";
+	} else {
+		text = response.text;
+	}
+	for (auto portal : nlohmann::json::parse(text)) {
+		result.emplace_back(portal_options{
+			url: portal["link"],
+			uploadPath: "/skynet/skyfile",
+			fileFieldname: "file",
+			directoryFileFieldname: "files[]"
+		});
+	}
+	return result;
+}
 
 skynet::skynet()
 : options(default_options())

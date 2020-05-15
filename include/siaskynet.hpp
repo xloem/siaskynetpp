@@ -14,6 +14,7 @@ public:
 		std::string directoryFileFieldname;
 	};
 	static portal_options default_options();
+	static std::vector<portal_options> portals();
 
 	struct upload_data {
 		std::string filename;
