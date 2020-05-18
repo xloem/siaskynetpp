@@ -126,7 +126,7 @@ public:
 				auto span = spans_iterator->first;
 				auto offset = spans_iterator->second["begin"];
 				if (offset <= head_node_content["bounds"][flow][span]["start"] || offset > head_node_content["bounds"][flow][span]["end"]) {
-					// considering with this error that order is held by 'flows', so spans in a flow are supposed to hold all the same ordering
+					// considering with this error that order is held by 'flows', so spans in one flow would hold all the same ordering
 					throw std::runtime_error("write flow '" + flow.value() + "' spans land in different blocks, don't know where to start");
 				}
 				// 15-1: the below two loops are for head_bounds. head bounds should be merged into lookup spans after or while they are generated
