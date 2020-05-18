@@ -11,11 +11,17 @@
 #include "crypto.hpp"
 
 using seconds_t = double;
+using offset_t = seconds_t; // TODO: use a type that can hold millionths accurately without bound, from some library for big values.
 
 seconds_t time()
 {
 	return std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count() / double(1000000);
 }
+
+/*
+ * 14-8-C: we tried to regenerate the whole algorithm plan to identify what is missing within the read function,
+ *         but [one of karl's 'voices' is fighting to hide the information and it is more efficient to keep working elsewhere]
+ */
 
 class skystream
 {
@@ -26,14 +32,14 @@ public:
 		tail.metadata = {
 			{"content", {
 				{"spans",{
-					//{"real", {
-						{"time", {{"start", time()}, {"end", time()}}},
+					{"real", {
+						{"time", {{"start", now}, {"end", now}}},
 						{"index", {{"start", 0}, {"end", 0}}},
 						{"bytes", {{"start", 0}, {"end", 0}}}
-					//}}
+					}}
 				}}
-			}}//,
-			//{"flows", {}}
+			}},
+			{"flows", {}}
 		};
 	}
 	skystream(std::string way, std::string link)
@@ -47,63 +53,119 @@ public:
 	: tail{identifiers, get_json(identifiers)}
 	{ }
 
-	std::vector<uint8_t> read(std::string span, double offset, std::string flow = "real")
+	std::vector<uint8_t> read(std::string span, offset_t offset, std::string flow = "real")
 	{
-		auto metadata = this->get_node(tail, span, offset).metadata;
+		auto metadata = this->get_node(tail, flow, span, offset).metadata;
 		auto metadata_content = metadata["content"];
-		double content_start = metadata_content["spans"][span]["start"];
+		offset_t content_start = metadata_content["spans"][flow][span]["start"];
 		if (span != "bytes" && offset != content_start) {
-			throw std::runtime_error(span + " " + std::to_string(offset) + " is within block span");
+			throw std::runtime_error(span + " " + std::to_string(offset) + " is between block bounds; interpolation not implemented");
 		}
 		auto data = get(metadata_content["identifiers"]);
 
 		auto begin = data.begin() + offset - content_start;
-		auto end = data.begin() + metadata_content["bounds"]["bytes"]["end"] - content_start;
+		auto end = data.begin() + offset_t(metadata_content["bounds"][flow]["bytes"]["end"]) - content_start;
 		return {begin, end};
 	}
 
-	void write(std::vector<uint8_t> & data, std::string span, double offset)
+	void write(std::vector<uint8_t> & data, nlohmann::json write_flows = {})
 	{
-		seconds_t end_time = time();
-		seconds_t start_time = tail.metadata["content"]["spans"]["time"]["end"];
+		// TODO: provide way to reflow existing data [arbitrary spans in arbitrary order, helpful for adding new flows after the start]
+
+		// 15: below should go after finding the preceding node, so we can fill in 'bytes' and 'index' if they are missing entirely
+		// fill in any missing things in write_flows, and ensure 'real' values are correct
+		for (auto & flow : write_flows) {
+			if (flow.contains("bytes")) {
+				if (!flow["bytes"].contains("end")) {
+					flow["bytes"]["end"] = flow["bytes"]["start"] + data.size();
+				}
+			}
+			if (flow.contains("index")) {
+				if (!flow["index"].contains("end")) {
+					flow["index"]["end"] = flow["index"]["start"] + 1;
+				}
+			}
+		}
+		auto tail_spans_real = tail.metadata["content"]["spans"]["real"];
+		for (auto & span : tail_spans_real.items()) {
+			write_flows["real"][span.key()]["start"] = span.value()["end"];
+		}
+		write_flows["real"]["index"]["end"] = write_flows["real"]["index"]["start"] + 1;
+		write_flows["real"]["bytes"]["end"] = write_flows["real"]["bytes"]["start"] + data.size();
+		write_flows["real"]["time"]["end"] = time();
+
+		std::map<std::string, node> head_nodes = {"real", tail};
+		nlohmann::json lookup_nodes; // plan is to keep head and tail lookup nodes in the same list, but not merge them across content
 		
-		node head_node;
-		nlohmann::json head_bounds;
-		unsigned long long start_bytes;
-		//unsigned long long full_size = data.size(); // let's try to implement by reusing surrounding data
-		unsigned long long index = tail.metadata["content"]["spans"]["index"]["end"];
-		if (offset == tail.metadata["content"]["spans"][span]["end"]) {
-			// append case, no head node to replace
-			start_bytes = tail.metadata["content"]["spans"]["bytes"]["end"];
-			//full_size = data.size();
-		} else {
-			nlohmann::json head_node_bounds;
-			head_node = this->get_node(this->tail, span, offset);
+		// 15: we're merging lookup generation into the below head_node loop.  it gets the preceding node now instead of the head node, which simplifies things.
+		for (auto flow_item : write_flows.items()) {
+			// 16: it might be good to do every flow separately, and have the whole thing within this loop.
+			std::string flow = flow_item.key();
+			auto write_spans = flow_item.value();
+
+			//if (flow.key() == "real") { continue; }
+			auto spans_iterator = write_spans.items().begin();
+			node preceding;
+			try {
+				preceding = this->get_node(this->tail, flow, spans_iterator->first, spans_iterator->second["begin"], true);
+			} catch (std::out_of_range const &error) {
+				// this line was quick to rethrow if the offset is out of bounds, succeeding only if the error was because there is no preceding block.
+				this->get_node(this->tali, flow.key(), spans_iterator->first, spans_iterator->second["begin"], false);
+				continue;
+			}
+			nlohmann::json new_lookup_node = preceding.metadata["content"][flow];
+			new_lookup_node["identifiers"] = preceding.identifers;
+			new_lookup_node["depth"] = 0;
+
+			lookup_nodes[flow] = preceding.metadata["flows"][flow];
+			lookup_nodes.emplace_back(new_lookup_node);
+			
+			//head_nodes[flow] = head_node;
 			auto head_node_content = head_node.metadata["content"];
-			double start_head = head_node_content["bounds"][span]["start"];
-			start_bytes = head_node_content["bounds"]["bytes"]["start"]; 
-			if (offset != start_head) {
-				if (span != "bytes") {
-					throw std::runtime_error(span + " " + std::to_string(offset) + " is within block span");
-				} else {
-					start_bytes = offset;
-					for (auto bound : head_node_content["bounds"].items()) {
-						if (bound.key() == "bytes") {
-							head_bounds["bytes"] = {{"start", bound.value()["start"]},{"end", start_bytes}};
+			for (; spans_iterator != write_spans.items().end(); ++ spans_iterator) {
+				auto span = spans_iterator->first;
+				auto offset = spans_iterator->second["begin"];
+				if (offset <= head_node_content["bounds"][flow][span]["start"] || offset > head_node_content["bounds"][flow][span]["end"]) {
+					// considering with this error that order is held by 'flows', so spans in a flow are supposed to hold all the same ordering
+					throw std::runtime_error("write flow '" + flow.value() + "' spans land in different blocks, don't know where to start");
+				}
+				// 15-1: the below two loops are for head_bounds. head bounds should be merged into lookup spans after or while they are generated
+				nlohmann::json head_bounds;
+				for (auto head_flow : head_node_contents["bounds"].items()) {
+					// this loop initializes head_bounds with the bounds from this node.  there might be a double nesting with one of the outer loops.
+					for (auto bound : head_flow.value().items) {
+							// uhhhhhhh...?
+							// ->1. head_bounds is supposed to describe the extent of the starting data.  so it can have 'end' cut short
+							// 	(also it's outdated; we won't be storing that in a separate object anymore)
+							// ->2. this examines every flow in that bounds of the actual head node
+							// ->3. then in every flow it examines every span
+							// ->4. then it sets the final bounds of that flow and span to be a copy.
+							// This produces bounds for every flow.  But this head node is only for one flow.
+							// I don't think we care about the boudns for other flows at this time, for this node.
+							// We don't really have a way to _use_ them.
+						head_bounds[head_flow.key()][bound.key()] = bound.value();
+					}
+				}
+				for (auto write_flow : write_flows.items()) {
+					// this appears to rewrite head_bounds so that its end is constrained by the write bounds, having trouble following
+					auto head_flow = head_node_contents["bounds"][write_flow.key()];
+					for (auto bound : write_flows.value().items()) {
+						offset_t end = bound.value()["end"];
+						offset_t start;
+						if (head_flow.contains(bound.key())) {
+							start = head_flow[bound.key()]["start"];
 						} else {
-							head_bounds[bound.key()] = {{"start", bound.value()["start"]},{"end", bound.value()["end"]}};
+							start = end;
 						}
+						head_bounds[write_flow.key()][bound.key()] = {{"start", start}, {"end", end}};
 					}
 				}
 			}
-			//full_size = data.size() + offset - start_head; // full_size is the number of bytes including the beginning bits of head_node
 		}
-		unsigned long long end_bytes = start_bytes + data.size(); /*full_size*/
-		nlohmann::json spans = { // these are the spans of the new write
-			{"time", {{"start", start_time},{"end", end_time}}},
-			{"bytes", {{"start", start_bytes},{"end", end_bytes}}},
-			{"index", {{"start", index}, {"end", index + 1}}}
-		};
+		// 14-5: find tail node for tree like head node was found
+		/*
+		unsigned long long end_bytes = start_bytes + data.size();
+		
 		node * tail_node;
 		nlohmann::json tail_bounds;
 		try {
@@ -121,12 +183,15 @@ public:
 		} catch (std::out_of_range const &) {
 			tail_node = &tail;
 		}
+		*/
 
-		nlohmann::json lookup_nodes = nlohmann::json::array();
-		size_t depth = 0;
+		// 14-4: build head flow trees from head_nodes.  see 15 above.
+		nlohmann::json lookup_nodes = {}
+
 		nlohmann::json new_lookup_node;
+
 		node preceding;
-		lookup_nodes.clear();
+
 		if (start_bytes > 0) { try {
 			preceding = this->get_node(tail, "bytes", start_bytes - 1); // preceding 
 			new_lookup_node = preceding.metadata["content"];
@@ -246,8 +311,8 @@ public:
 			}},
 			/* 10:
 			{"flow", { 
-				{"logical", lookup_nodes},
-				{"creation", append_only_lookup_nodes_of_time_and_index}
+				{"real", append_only_lookup_nodes_of_time_and_index}
+				{"logic", lookup_nodes},
 			}},
 			*/
 			{"lookup", lookup_nodes}
@@ -257,9 +322,6 @@ public:
 
 		sia::skynet::upload_data metadata_upload("metadata.json", std::vector<uint8_t>{metadata_string.begin(), metadata_string.end()}, "application/json");
 		sia::skynet::upload_data content("content", data, "application/octet-stream");
-
-		// CHANGE 3C: let's try to reuse all surrounding data using the new 'bounds' attribute
-		// 3C: TODO: we want to insert into content from head_node if we are doing a midway-write (full_size above).  we could also split the write into two.
 
 		auto metadata_identifiers = cryptography.digests({&metadata_upload.data});
 
@@ -348,36 +410,40 @@ private:
 		nlohmann::json metadata;
 	};
 
-	node & get_node(node & start, std::string span, double offset, nlohmann::json bounds = {})
+	node & get_node(node & start, std::string flow, std::string span, double offset, bool preceding = false, nlohmann::json bounds = {})
 	{
-		auto content_spans = start.metadata["content"]["spans"];
+		auto content_spans = start.metadata["content"]["spans"][flow];
 		auto content_span = content_spans[span];
-		if (offset >= content_span["start"] && offset < content_span["end"]) {
+		if (preceding ? (offset > content_span["start"] && offset <= content_span["end"]) : (offset >= content_span["start"] && offset < content_span["end"])) {
 			start.metadata["content"]["bounds"] = bounds.is_null() ? content_spans : bounds;
 			return start;
 		}
-		for (auto & lookup : start.metadata["lookup"]) {
+		// TODO: 14-8-C: I remembered to add something when updating this function for 'flows' that I forgot by the time I finished
+		// 		 seemed kind of like a change or reference to a single line or component, that offered a cool algorithmic simplicity
+		// 		 I expect not having done this to possibly cause a rare issue I run into when trying to use this, unsure.
+		// 		 UPDATE: i've since updated this fucntion from (offset == end) to checking a span for preceding byte
+		for (auto & lookup : start.metadata["flows"][flow]) {
 			auto lookup_spans = lookup["spans"];
 			for (auto & bound : bounds.items()) {
 				if (!lookup_spans.contains(bound.key())) { continue; }
-				auto bound_span = lookup_spans[bound.key()];
-				if (bound.value()["begin"] > bound_span["begin"]) {
-					bound_span["begin"] = bound.value()["begin"];
+				auto lookup_span = lookup_spans[bound.key()];
+				if (bound.value()["begin"] > lookup_span["begin"]) {
+					lookup_span["begin"] = bound.value()["begin"];
 				}
-				if (bound.value()["end"] < bound_span["end"]) {
-					bound_span["end"] = bound.value()["end"];
+				if (bound.value()["end"] < lookup_span["end"]) {
+					lookup_span["end"] = bound.value()["end"];
 				}
 			}
-			auto lookup_span = lookup["spans"][span];
+			auto lookup_span = lookup_spans[span];
 			double start = lookup_span["start"];
 			double end = lookup_span["end"];
-			if (offset >= start && offset < end) {
+			if (preceding ? (offset > start && offset <= end) : (offset >= start && offset < end)) {
 				auto identifiers = lookup["identifiers"];
 				std::string identifier = identifiers.begin().value();
 				if (!cache.count(identifier)) {
 					cache[identifier] = node{identifiers, get_json(identifiers)};
 				}
-				return get_node(cache[identifier], span, offset, lookup_spans);
+				return get_node(cache[identifier], span, offset, preceding, lookup_spans);
 			}
 		}
 		throw std::out_of_range(span + " " + std::to_string(offset) + " out of range");
