@@ -73,16 +73,28 @@ public:
 	{
 		// 15: below should go after finding the preceding node, so we can fill in 'bytes' and 'index' if they are missing entirely
 		// fill in any missing things in write_flows, and ensure 'real' values are correct
-		for (auto & flow : write_flows) {
-			if (flow.contains("bytes")) {
-				if (!flow["bytes"].contains("end")) {
-					flow["bytes"]["end"] = (unsigned long long)flow["bytes"]["start"] + data.size();
+		for (auto & flow : write_flows.items()) {
+			// write flows is indexed first by flow, then by span
+			nlohmann::json tail_flow = tail["content"]["spans"].contains(flow.key()) ? tail["content"]["spans"][flow.key()] : {};
+			if (!flow.value()["bytes"].contains("start")) {
+				if (tail_flow.contains("bytes")) {
+					flow.value()["bytes"]["start"] = tail_flow["bytes"]["end"];
+				} else {
+					flow.value()["bytes"]["start"] = 0;
 				}
 			}
-			if (flow.contains("index")) {
-				if (!flow["index"].contains("end")) {
-					flow["index"]["end"] = (unsigned long long)flow["index"]["start"] + 1;
+			if (!flow.value()["bytes"].contains("end")) {
+				flow.value()["bytes"]["end"] = (unsigned long long)flow.value()["bytes"]["start"] + data.size();
+			}
+			if (!flow.value()["index"].contains("start")) {
+				if (tail_flow.contains("index")) {
+					flow.value()["index"]["start"] = tail_flow["index"]["end"];
+				} else {
+					flow.value()["index"]["start"] = 0;
 				}
+			}
+			if (!flow.value()["index"].contains("end")) {
+				flow.value()["index"]["end"] = (unsigned long long)flow.value()["index"]["start"] + 1;
 			}
 		}
 		auto tail_spans_real = tail.metadata["content"]["spans"]["real"];
