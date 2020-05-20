@@ -94,7 +94,7 @@ public:
 		write_flows["real"]["time"]["end"] = time();
 
 		std::map<std::string, node> head_nodes = {"real", tail};
-		nlohmann::json lookup_nodes; // plan is to keep head and tail lookup nodes in the same list, but not merge them across content
+		nlohmann::json lookup_flows;  // in each flow, one list for both head and tail trees
 		
 		// 15: we're merging lookup generation into the below head_node loop.  it gets the preceding node now instead of the head node, which simplifies things.
 		for (auto flow_item : write_flows.items()) {
@@ -108,7 +108,7 @@ public:
 			try {
 				nlohmann::json bounds = {};
 				for (auto item : write_spans) {
-					bounds[item.key()] = {"begin": item.value()["begin"], "end": item.value()["end"]};
+					bounds[item.key()] = {"end": item.value()["start"]};
 				}
 				// hoping this will automatically crop the bounds
 				preceding = this->get_node(this->tail, flow, spans_iterator->first, spans_iterator->second["begin"], true, bounds);
@@ -123,7 +123,7 @@ public:
 			new_lookup_node["depth"] = 0;
 
 			lookup_nodes[flow] = preceding.metadata["flows"][flow];
-			lookup_nodes.emplace_back(new_lookup_node);
+			lookup_nodes[flow].emplace_back(new_lookup_node);
 			
 			//head_nodes[flow] = head_node;
 			auto head_node_content = head_node.metadata["content"];
@@ -432,14 +432,13 @@ private:
 			auto lookup_spans = lookup["spans"];
 			for (auto & lookup_span : lookup_spans.items()) {
 				if (!bound.contains(lookup_span.key())) {
-					bound[lookup_span.key()] = lookup_span.value();
-					continue;
+					bound[lookup_span.key()] = {};
 				}
 				auto bound = bounds[lookup_span.key()];
-				if (bound["begin"] < lookup_span.value()["begin"]) {
+				if (!bound.contains("begin") || bound["begin"] < lookup_span.value()["begin"]) {
 					bound["begin"] = lookup_span.value()["begin"];
 				}
-				if (bound["end"] > lookup_span.value()["end"]) {
+				if (!bound.contains("end") || bound["end"] > lookup_span.value()["end"]) {
 					bound["end"] = lookup_span.value()["end"];
 				}
 			}
