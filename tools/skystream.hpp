@@ -108,9 +108,9 @@ public:
 			try {
 				nlohmann::json bounds = {};
 				for (auto item : write_spans) {
-					bounds[item.key()] = {"end": item.value()["start"]};
+					bounds[item.key()] = {"end": item.value()["begin"]};
 				}
-				// hoping this will automatically crop the bounds
+				// hoping this will automatically crop and merge the bounds
 				preceding = this->get_node(this->tail, flow, spans_iterator->first, spans_iterator->second["begin"], true, bounds);
 			} catch (std::out_of_range const &error) {
 				// this line was quick to rethrow if the offset is out of bounds, succeeding only if the error was because there is no preceding block.
