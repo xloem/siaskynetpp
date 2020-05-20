@@ -57,32 +57,31 @@ public:
 	{
 		auto metadata = this->get_node(tail, flow, span, offset).metadata;
 		auto metadata_content = metadata["content"];
-		offset_t content_start = metadata_content["spans"][flow][span]["start"];
+		offset_t raw_start = metadata_content["spans"][flow][span]["start"];
+		offset_t content_start = metadata.bounds[span]["start"];
 		if (span != "bytes" && offset != content_start) {
 			throw std::runtime_error(span + " " + std::to_string(offset) + " is between block bounds; interpolation not implemented");
 		}
 		auto data = get(metadata_content["identifiers"]);
 
-		auto begin = data.begin() + offset - content_start;
-		auto end = data.begin() + offset_t(metadata_content["bounds"][flow]["bytes"]["end"]) - content_start;
+		auto begin = data.begin() + offset - raw_start;
+		auto end = data.begin() + offset_t(metadata.bounds["bytes"]["end"]) - raw_start;
 		return {begin, end};
 	}
 
 	void write(std::vector<uint8_t> & data, nlohmann::json write_flows = {})
 	{
-		// TODO: provide way to reflow existing data [arbitrary spans in arbitrary order, helpful for adding new flows after the start]
-
 		// 15: below should go after finding the preceding node, so we can fill in 'bytes' and 'index' if they are missing entirely
 		// fill in any missing things in write_flows, and ensure 'real' values are correct
 		for (auto & flow : write_flows) {
 			if (flow.contains("bytes")) {
 				if (!flow["bytes"].contains("end")) {
-					flow["bytes"]["end"] = flow["bytes"]["start"] + data.size();
+					flow["bytes"]["end"] = (unsigned long long)flow["bytes"]["start"] + data.size();
 				}
 			}
 			if (flow.contains("index")) {
 				if (!flow["index"].contains("end")) {
-					flow["index"]["end"] = flow["index"]["start"] + 1;
+					flow["index"]["end"] = (unsigned long long)flow["index"]["start"] + 1;
 				}
 			}
 		}
@@ -107,13 +106,14 @@ public:
 			auto spans_iterator = write_spans.items().begin();
 			node preceding;
 			try {
+				// TODO: provide proper bounds
 				preceding = this->get_node(this->tail, flow, spans_iterator->first, spans_iterator->second["begin"], true);
 			} catch (std::out_of_range const &error) {
 				// this line was quick to rethrow if the offset is out of bounds, succeeding only if the error was because there is no preceding block.
 				this->get_node(this->tali, flow.key(), spans_iterator->first, spans_iterator->second["begin"], false);
 				continue;
 			}
-			nlohmann::json new_lookup_node = preceding.metadata["content"][flow];
+			nlohmann::json new_lookup_node = preceding.metadata["content"][flow]; // TODO: we want to respect bounds
 			new_lookup_node["identifiers"] = preceding.identifers;
 			new_lookup_node["depth"] = 0;
 
@@ -406,6 +406,7 @@ public:
 private:
 	struct node
 	{
+		nlohmann::json bounds;
 		nlohmann::json identifiers;
 		nlohmann::json metadata;
 	};
@@ -415,35 +416,38 @@ private:
 		auto content_spans = start.metadata["content"]["spans"][flow];
 		auto content_span = content_spans[span];
 		if (preceding ? (offset > content_span["start"] && offset <= content_span["end"]) : (offset >= content_span["start"] && offset < content_span["end"])) {
-			start.metadata["content"]["bounds"] = bounds.is_null() ? content_spans : bounds;
-			return start;
+			return { bounds.is_null() ? content_spans : bounds, start.identifiers, start.metadata };
 		}
 		// TODO: 14-8-C: I remembered to add something when updating this function for 'flows' that I forgot by the time I finished
 		// 		 seemed kind of like a change or reference to a single line or component, that offered a cool algorithmic simplicity
 		// 		 I expect not having done this to possibly cause a rare issue I run into when trying to use this, unsure.
 		// 		 UPDATE: i've since updated this fucntion from (offset == end) to checking a span for preceding byte
+		//		 UPDATE 2: I've since updated the function to separate bounds from cache.  => get_node looks good for now to me. <=
 		for (auto & lookup : start.metadata["flows"][flow]) {
 			auto lookup_spans = lookup["spans"];
-			for (auto & bound : bounds.items()) {
-				if (!lookup_spans.contains(bound.key())) { continue; }
-				auto lookup_span = lookup_spans[bound.key()];
-				if (bound.value()["begin"] > lookup_span["begin"]) {
-					lookup_span["begin"] = bound.value()["begin"];
+			for (auto & lookup_span : lookup_spans.items()) {
+				if (!bound.contains(lookup_span.key())) {
+					bound[lookup_span.key()] = lookup_span.value();
+					continue;
 				}
-				if (bound.value()["end"] < lookup_span["end"]) {
-					lookup_span["end"] = bound.value()["end"];
+				auto bound = bounds[lookup_span.key()];
+				if (bound["begin"] < lookup_span.value()["begin"]) {
+					bound["begin"] = lookup_span.value()["begin"];
+				}
+				if (bound["end"] > lookup_span.value()["end"]) {
+					bound["end"] = lookup_span.value()["end"];
 				}
 			}
-			auto lookup_span = lookup_spans[span];
-			double start = lookup_span["start"];
-			double end = lookup_span["end"];
+			auto bound = bounds[span];
+			double start = bound["start"];
+			double end = bound["end"];
 			if (preceding ? (offset > start && offset <= end) : (offset >= start && offset < end)) {
 				auto identifiers = lookup["identifiers"];
 				std::string identifier = identifiers.begin().value();
 				if (!cache.count(identifier)) {
-					cache[identifier] = node{identifiers, get_json(identifiers)};
+					cache[identifier] = node{{}, identifiers, get_json(identifiers)};
 				}
-				return get_node(cache[identifier], span, offset, preceding, lookup_spans);
+				return get_node(cache[identifier], span, offset, preceding, bounds);
 			}
 		}
 		throw std::out_of_range(span + " " + std::to_string(offset) + " out of range");
