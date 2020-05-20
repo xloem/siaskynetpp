@@ -105,7 +105,7 @@ public:
 		write_flows["real"]["bytes"]["end"] = write_flows["real"]["bytes"]["start"] + data.size();
 		write_flows["real"]["time"]["end"] = time();
 
-		std::map<std::string, node> head_nodes = {"real", tail};
+		//std::map<std::string, node> head_nodes = {"real", tail};
 		nlohmann::json lookup_flows;  // in each flow, one list for both head and tail trees
 		
 		// 15: we're merging lookup generation into the below head_node loop.  it gets the preceding node now instead of the head node, which simplifies things.
@@ -113,6 +113,8 @@ public:
 			// 16: it might be good to do every flow separately, and have the whole thing within this loop.
 			std::string flow = flow_item.key();
 			auto write_spans = flow_item.value();
+
+			auto & lookup_nodes = lookup_flows[flow] = {};
 
 			//if (flow.key() == "real") { continue; }
 			auto spans_iterator = write_spans.items().begin();
@@ -122,21 +124,72 @@ public:
 				for (auto item : write_spans) {
 					bounds[item.key()] = {"end": item.value()["begin"]};
 				}
-				// hoping this will automatically crop and merge the bounds
+				// planning for this to automatically crop and merge the bounds
 				preceding = this->get_node(this->tail, flow, spans_iterator->first, spans_iterator->second["begin"], true, bounds);
 			} catch (std::out_of_range const &error) {
-				// this line was quick to rethrow if the offset is out of bounds, succeeding only if the error was because there is no preceding block.
-				this->get_node(this->tali, flow.key(), spans_iterator->first, spans_iterator->second["begin"], false);
-				continue;
-			}
-			nlohmann::json new_lookup_node = {};
-			new_lookup_node["spans"] = preceding.bounds;
-			new_lookup_node["identifiers"] = preceding.identifers;
-			new_lookup_node["depth"] = 0;
+				// this line was made quickly to rethrow if the offset is actually out of bounds, succeeding only if the error was because there is no preceding block.
+				// an alternative would be to extend the flow with gaps to include the write, maybe make that configurable some day
+				this->get_node(this->tail, flow.key(), spans_iterator->first, spans_iterator->second["begin"], false);
 
-			lookup_nodes[flow] = preceding.metadata["flows"][flow];
-			lookup_nodes[flow].emplace_back(new_lookup_node);
+			}
+			if (!preceding.is_null()) {
+				nlohmann::json new_lookup_node = {};
+				new_lookup_node["spans"] = preceding.bounds;
+				new_lookup_node["identifiers"] = preceding.identifers;
+				new_lookup_node["depth"] = 0;
+	
+				lookup_nodes = nlohmann::json(preceding.metadata["flows"][flow]);
+				lookup_nodes.emplace_back(new_lookup_node);
+			}
+			// 14-5: TODO find tail node for tree like head node was found, or somehow merge in tail lookup nodes
+
+				// 20: okay umm if we lookup offset we get the wrong tree but the right bounds for the node in it
+				// 	20-1 -> review use of 'bounds' for head node, may not help with tail nodes
+				// 	20-2 -> consider mutating lookup nodes within the below loop to enforce bounds
+				// 	20-3 -> consider not mutating lookup nodes at all? [could be misleading to other client implementations]
+
+
+			for (size_t index = 0; index + 1 < lookup_nodes.size();) {
+				auto & current_node = lookup_nodes[index];
+				auto next_node = lookup_nodes[index + 1];
+				// NOTE: it should be fine to merge across content if reading checks the content first
+				if (current_node["depth"] == next_node["depth"]) {
+					nlohmann::json new_node = { };
+					auto new_spans = new_node["spans"];
+					auto next_spans = next_node["spans"];
+					for (auto & span : current_node["spans"].items()) {
+						auto & current_span = span.value();
+						if (!next_span.contains(span.key())) {
+							new_spans[span.key()] = { "begin": current_span["begin"], "end": current_span["end"] };
+							continue;
+						}
+						auto & next_span = next_spans[span.key()];
+						if (current_span["end"] != next_span["start"]) {
+							// NOTE the logic in this 'for' block should change if this check is changed
+							// 	[to accommodate out-of-order lookup nodes or gaps in flows between spans]
+							throw std::runtime_error("out of order lookup nodes found: TODO check for this when verifying them during download, but keep this assertion");
+						}
+						new_spans[span.key()] = { "begin": current_span["begin"], "end": next_span["end"] };
+					}
+					for (auto & next_span : next_spans.items()) {
+						if (new_node.contains(next_span.key())) {
+							continue;
+						}
+						new_spans[next_span.key()] = { "begin"; next_span.value()["begin"], "end": next_span.value()["end"] };
+					}
+					// 19: check preceding's domain for this
+					new_node["identifiers"] = preceding.identifiers;
+					new_node["depth"] = (unsigned long long)current_node["depth"] + 1;
+					current_node = new_node;
+					lookup_nodes.erase(index + 1);
+				} else {
+					++ index;
+				}
+			}
+
+			// 19: this code above is duplicated a bit below in an older way.  below that is unmerged stuff.
 			
+			/*
 			//head_nodes[flow] = head_node;
 			auto head_node_content = head_node.metadata["content"];
 			for (; spans_iterator != write_spans.items().end(); ++ spans_iterator) {
@@ -178,8 +231,10 @@ public:
 					}
 				}
 			}
+			*/
 		}
-		// 14-5: find tail node for tree like head node was found
+
+
 		/*
 		unsigned long long end_bytes = start_bytes + data.size();
 		
@@ -203,6 +258,7 @@ public:
 		*/
 
 		// 14-4: build head flow trees from head_nodes.  see 15 above.
+		/*
 		nlohmann::json lookup_nodes = {}
 
 		nlohmann::json new_lookup_node;
@@ -217,9 +273,11 @@ public:
 			lookup_nodes = preceding.metadata["lookup"]; // everything in lookup nodes is accessible via preceding's identifiers
 			lookup_nodes.emplace_back(new_lookup_node);
 		} catch (std::out_of_range const &) { } }
+		*/
 
 		// 8: we have a new way of merging lookup nodes.  we merge all adjacent pairs with equal depth, repeatedly.
 		// this means below algorithm should change to add new_lookup_node first, and then merge after adding.
+		/*
 		for (size_t index = 0; index + 1 < lookup_nodes.size();) {
 			auto & current_node = lookup_nodes[index];
 			auto & next_node = lookup_nodes[index + 1];
@@ -283,41 +341,18 @@ public:
 			} else {
 				++ index;
 			}
-		}
-		// 9: this is old implementation, below loop.  9: above loop is wip new implementation
-		/*
-		while (lookup_nodes.size() && lookup_nodes.back()["depth"] == depth) {
-			auto & back = lookup_nodes.back();
-			auto & back_spans = back["spans"];
-			for (auto & span : new_lookup_node["spans"].items()) {
-				auto start = back_spans[span.key()]["start"];
-				span.value()["start"] = start;
-			}
-			auto end = lookup_nodes.end();
-			-- end;
-			lookup_nodes.erase(end);
+		}*/
 
-			++ depth;
-		}
-		*/
-
-
-		// end: we can make a new tail metadata node that indexes everything afterward.  it can even have tree nodes if desired.
-		// 5: remaining before testing: build lookup nodes using three more sources in 1-2-3 order
-		//  1. if !head_bounds.is_null(), then add a lookup reference for head
-			// note: we can't merge this lookup node with previous because it is the only one with a link to its content.
-		if (!head_bounds.is_null()) {
-			lookup_nodes.emplace_back(nlohmann::json{
-				{"identifiers", head_node.identifiers},
-				{"spans", head_bounds},
-				{"depth", 0} // now .... will this get merged if we append to tail after this?
-						// when appending we assuming depth reduces forward, which is no longer true.
-						// we probably want to reduce depth within as well as forward.
-			});
-		}
+		// 22: remember to provide for storing multiply on sia skynet
 
 		//  2. if !tail_bounds.is_null(), then add a lookup reference for tail
 		//  3. reference node hierarchies until real tail to complete reference to rest of doc
+
+		// .... okay, for tail:
+		// 	(1) we use this->tail as the identifiers node
+		// 	(2) we add its lookup elements to our lookup elements
+		// 	(3) we can use write_flows items to determine which identifiers node to use when merging
+		// 		(3:b) -> for merging across content, which identifiers node to use?  probably not merge across content
 
 		auto content_identifiers = cryptography.digests({&data});
 		nlohmann::json metadata_json = {
@@ -478,6 +513,7 @@ private:
 		std::string skylink = identifiers["skylink"];
 		skylink.resize(52); skylink += "/content";
 		result["content"]["identifiers"]["skylink"] = skylink;
+		// 18: TODO: parse 0.0.9 format by assuming the fields are all from the 'real' flow
 		return result;
 	}
 
