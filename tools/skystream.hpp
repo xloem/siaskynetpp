@@ -71,11 +71,15 @@ public:
 
 	void write(std::vector<uint8_t> & data, nlohmann::json write_flows = {})
 	{
-		// 15: below should go after finding the preceding node, so we can fill in 'bytes' and 'index' if they are missing entirely
+		// 30: new plan.  to simplify the algorithm, which helps it have community,
+		//     we'll just reuse the tail node lookups for even midflow writes.
+		//     that's means making the lookup table by merging tail's content into their table.
+		//
+
 		// fill in any missing things in write_flows, and ensure 'real' values are correct
 		for (auto & flow : write_flows.items()) {
 			// write flows is indexed first by flow, then by span
-			nlohmann::json tail_flow = tail["content"]["spans"].contains(flow.key()) ? tail["content"]["spans"][flow.key()] : {};
+			nlohmann::json tail_flow = tail.metadata["content"]["spans"].contains(flow.key()) ? tail.metadata["content"]["spans"][flow.key()] : {};
 			if (!flow.value()["bytes"].contains("start")) {
 				if (tail_flow.contains("bytes")) {
 					flow.value()["bytes"]["start"] = tail_flow["bytes"]["end"];
@@ -105,20 +109,20 @@ public:
 		write_flows["real"]["bytes"]["end"] = write_flows["real"]["bytes"]["start"] + data.size();
 		write_flows["real"]["time"]["end"] = time();
 
-		//std::map<std::string, node> head_nodes = {"real", tail};
 		nlohmann::json lookup_flows;  // in each flow, one list for both head and tail trees
 		
-		// 15: we're merging lookup generation into the below head_node loop.  it gets the preceding node now instead of the head node, which simplifies things.
+		// 16: it might be good to do every flow separately, and have the whole thing within this loop.
 		for (auto flow_item : write_flows.items()) {
-			// 16: it might be good to do every flow separately, and have the whole thing within this loop.
 			std::string flow = flow_item.key();
 			auto write_spans = flow_item.value();
 
-			auto & lookup_nodes = lookup_flows[flow] = {};
+			auto tail_content_spans = tail["content"]["spans"][flow];
 
-			//if (flow.key() == "real") { continue; }
+			auto & lookup_nodes = lookup_flows[flow] = tail["flows"][flow];
+
 			auto spans_iterator = write_spans.items().begin();
-			node preceding;
+			auto tail_lookup_nodes = tail.
+			/*node preceding;
 			try {
 				nlohmann::json bounds = {};
 				for (auto item : write_spans) {
@@ -131,14 +135,16 @@ public:
 				// an alternative would be to extend the flow with gaps to include the write, maybe make that configurable some day
 				this->get_node(this->tail, flow.key(), spans_iterator->first, spans_iterator->second["begin"], false);
 
-			}
-			if (!preceding.is_null()) {
+			}*/
+			if (!tail_content_spans.is_null()) {
 				nlohmann::json new_lookup_node = {};
-				new_lookup_node["spans"] = preceding.bounds;
-				new_lookup_node["identifiers"] = preceding.identifers;
+				new_lookup_node["spans"] = tail_content_spans;
+				new_lookup_node["identifiers"] = tail.identifiers;
 				new_lookup_node["depth"] = 0;
-	
-				lookup_nodes = nlohmann::json(preceding.metadata["flows"][flow]);
+				
+				// we actually want to insert this at the proper location, and adjust the bounds of the things around it.
+					// how do we handle if they are high depth?
+						// uh-oh!
 				lookup_nodes.emplace_back(new_lookup_node);
 			}
 			// 14-5: TODO find tail node for tree like head node was found, or somehow merge in tail lookup nodes

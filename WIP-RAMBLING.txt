@@ -1,0 +1,176 @@
+ok
+
+algorithm change idea to keep logarithmic size for random writes, possibly
+
+consider not building the tree as we write: it's like building a tree that is as deep as it is wide.
+
+we'll want to rebalance that tree as we build it.
+
+	we'll want to rebalance every write.  but we can only produce 1 new root every write, right?
+
+anyway
+
+previous way:
+	A; 1
+
+	B: 2 A.0
+	
+	C: 3 B.1(2.0 A.0)
+
+	D: 4 C.0 B.1
+
+FOR BUNDLING ALL UP AND LENGTHENING, YOUR DEPTH KEEPS GETTING DEEPER.
+	REBALANCE TO SHRINK DEPTHS.  FIND WHAT PARTS OF A NODE MAKE IT DEEP, AND GET THOSE BITS FROM ELSEWHERE.  THEN ITS DEPTH CAN BE SHRUNK.
+		possible that we only want to grow depth when it is from merging adjacent nodes: not from linking to a deep thing.
+
+	this seems the way to go, possibly
+		we would descend into tail node, and remove its deepest bits, adding them adjacent to it, and updating its spans
+		when we have adjecent nodes of the same depth, we merge and use the source as the new root for just right there.
+
+			doing that constantly may make another pattern, unsure.
+				[when we look at tail node, we can see the deepest bits in it.  not much descending always needed.]
+			so we break nodes apart, kinda -- same as reusing the lookup table and merging
+			we let the metadata grow wide, and plan to use large chunk sizes, to make that worthwhile.
+
+
+		so our write is midway through tail ... we descend into tail and find the node that our write will overwrite, atm
+		that node will give us a bunch of stuff, but we likely also want the node prior?
+
+			hum imagining descening into last node
+			we bump into stuff left and right, each has a depth
+			we want to keep our depth the same, so we might descend all the way and pull out the deepest leaf nodes
+				[we pursue the deepest depths]
+			these leaf nodes get added to the lookup table, then as we rise we can reduce the depths of everything, and add them too.
+				while doing this we split around the write position
+
+			then we can merge leaves in the lookup table, making the tree be binary again?
+				[update algorithm, leaves can't be merged if they came from different thingies]
+					imagining going down towards leaves and finding some leaves in parallel.
+					an actual binary tree.  this whole binary tree could be taken and moved in. why keep descending?
+					i see; if we bump into a balanced tree we can just reuse it.  but that's confusing with some of the data
+					being tacked onto the root.  if we find that all the depths in a tree are the same, we may want to break
+					those parts all out, and tag them that they can be bundled together based on that root.
+
+			so as we go down to leaves, each leaf can be bundled with other leaves based on some root.
+			we only want to use roots that have below a maximum depth.
+			so another approach is simply to reuse the parts of the tail node again ... these have maximum depth ...
+				[we get to merge tail's content into tail node] [is a reference to tail node itself, depth=0]
+					okay, so we pull out of tail node the bits that are deep, and reuse tail node for other bits.
+					like, take tail, and add on tail's deepest parts outside of tail.  can merge if tail depth has reached.
+					maybe?
+
+
+[this might be a poor idea ...  directory hierarchies might be the way to go]
+	[fs do many random writes, in order to keep room for their files; each write is a seek which would be a new metadata in current system]
+		[still works for rarely-modified stuff]
+
+
+Let's consider how a block device would work.
+
+	A[0-100]
+
+		write: B 52-58
+
+	B: A.0[0-52] B[52-58] A.0[58-100] (we could shrink this if we reordered for what to look into first)
+
+		write C 23-29
+
+	C: A.0[0-23] C[23-29] B.1[29-100] NOT REORDERING seems to work so far, involves constraining depth
+
+considering REORDERING TO KEEP EXTENT INFORMATION PRESENT.  means spans listed first overwrite spans listed later.
+	if we see spans listed later, and their bounds aren't overwritten, they can be merged.  increases depth
+	in fact, they can even be merged if their bounds are overwritten, because they come later.
+
+	to merge them, we have to replace both of them with a reference to something that references them in the same order
+
+	A[0-100]
+		write: B 52-58
+	B: B[52-58] A.0[0-100]
+		write: C 23-29
+	C: C[23-29] B.0[52-58] A.0[0-100] <- note, C does not have to be before B; A can merge with B if desired
+	C: C[23-29] B.1[0-100]
+
+		write: D 76-82
+	D: D[76-82] C.0[23-29] B.1[0-100]
+		write: E 52-28
+	E: E[52-58] D.0[76-82] C.0[23-29] B.1[0-100]
+		when we try to make D.1 it gets funny.  it becomes D.2.  we'd have to pull out B.1 and merge it, which gets a little weird, because
+		all the areas between D and C are still .2 .  it would be D.1[23-29,76-82].  pretty sure there's a better rebalancing.
+		C.1[0-52] B.1[0-100]
+
+[reconsidering quickly accessing data by reusing nodes and creating 1 new one.  just want to limit depth.]
+	[random writes means making new ways of accessing things, which means the latest update gets wide.]
+	[for random writes we'll have wide updates.  we want this so we can be referenced later with shallow depth.]
+		
+		
+
+=( let's try to implement something basic, even though it won't be done right.
+	we can just tack on the latest write node at the start of the lookup nodes, and have it searched before the others are reached.
+		[how would merging look in that scenario?]
+
+
+FOR ADDING MANY NODES SIDE-BY-SIDE
+	... let's pursue the depth way for now
+
+considering:
+	A: 1
+			width=0 size=1 height=0
+	B: 2 A.1
+			width=1 size=2 height=1
+	C: 3 B.1 A.1
+			width=2 size=3 height=1
+	D: 4 C.1 B.1 A.1
+			width=3 size=4 height=1 log2(4) = 2
+				width > math.ceil(log2(size)) maybe is a possible indicator
+
+			our width is too large. 4 is a power of two, so our width should be 2.
+
+			A,B is held by B.2
+			C,D is held by C.0 and our write
+			
+				to do that i broke the whole stream in half, and bundled the sides up, by digging into them to see where else they could go.
+				i inspected the first half to find a chunk that would encompass the whole thing with the proper depth.
+
+					this could be aided by tagging nodes with their total extents, rather than just their relevant extents.
+					the nodes _overlap_.  unfortunately with midwriting the overlapness can change.
+	D: 4 C.1 B.2
+
+		now say i rewrite B.
+
+	E: 2 D.2 A.1
+			D covered everything, so I took 2 D.3 and dug into D until I found B.  B was a midroot in D, so I had to readd its children.
+
+		say for E instead of rewriting B I wrote partway into B
+
+	E: 2.5 D.2 B.2
+			it seems to work fine ......  i did the same depth-thing, where I dug into D and split out the material that was before E.
+			it worked because D was append-only, so before-after was easy to split.  but really they're all ordered, so before-after is
+			always easy to split.
+			this would make every write have a size of 3, which makes us get too deep.
+
+
+
+				
+
+considering:
+	A: 1
+
+	B: 2 A.1(1)
+			width=1 size=2 height=1 log2(2) = 1
+
+	C: 3 B.2(2 A.1)
+			width=1 size=3 height=2 log2(3) = 1-2
+
+	D: 4 C.3(3 B.2)
+			width=1 size=4 height=3 log2(4) = 2
+			height has exceeded log2(size) so we rebalance		
+
+				we'll link like 1.2 2.1 3.1 4.0
+				which is B C 4.0, same result as original.  we added a leaf and two nodes, one a root.
+					(width=2)
+
+			C.3 is too big.  So we don't _use_ C for its deepest bit, which is A.
+			We can get A via B.
+			
+					
+
