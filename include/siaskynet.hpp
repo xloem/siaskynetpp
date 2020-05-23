@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <string>
 #include <vector>
 
@@ -49,19 +50,19 @@ public:
 	skynet(portal_options const & options);
 	portal_options options;
 
-	response query(std::string const & skylink);
-	response download(std::string const & skylink, std::initializer_list<std::pair<size_t, size_t>> ranges = {});
-	response download_file(std::string const & path, std::string const & skylink);
+	response query(std::string const & skylink, std::chrono::milliseconds timeout = std::chrono::milliseconds(0));
+	response download(std::string const & skylink, std::initializer_list<std::pair<size_t, size_t>> ranges = {}, std::chrono::milliseconds timeout = std::chrono::milliseconds(0));
+	response download_file(std::string const & path, std::string const & skylink, std::chrono::milliseconds timeout = std::chrono::milliseconds(0));
 
 	template <typename Data>
-	std::string upload(std::string const & filename, Data const & data, std::string const & contenttype = {})
+	std::string upload(std::string const & filename, Data const & data, std::string const & contenttype = {}, std::chrono::milliseconds timeout = std::chrono::milliseconds(0))
 	{
-		return upload(upload_data{filename, data, contenttype});
+		return upload(upload_data{filename, data, contenttype}, timeout);
 	}
-	std::string upload(upload_data const & file);
-	std::string upload(std::string const & filename, std::vector<upload_data> const & files);
-	std::string upload_file(std::string const & path, std::string filename = "");
-	//TODO: void upload_directory(std::string const & path);
+	std::string upload(upload_data const & file, std::chrono::milliseconds timeout = std::chrono::milliseconds(0));
+	std::string upload(std::string const & filename, std::vector<upload_data> const & files, std::chrono::milliseconds timeout = std::chrono::milliseconds(0));
+	std::string upload_file(std::string const & path, std::string filename = "", std::chrono::milliseconds timeout = std::chrono::milliseconds(0));
+	//TODO: void upload_directory(std::string const & path, std::chrono::milliseconds timeout = std::chrono::milliseconds(0));
 };
 
 }

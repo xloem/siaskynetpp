@@ -422,6 +422,7 @@ private:
 	nlohmann::json lookup_nodes(node & source, nlohmann::json & bounds)
 	{
 		// to do this right, consider that source's content may be in the middle of its lookups.  so you want to put it in the right spot.
+		return {}; // STUB
 	}
 
 	sia::skynet portal;
