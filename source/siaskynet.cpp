@@ -1,15 +1,18 @@
 #include <siaskynet.hpp>
 
 #include <cpr/cpr.h>
+#include <ghc/filesystem.hpp>
 #include <nlohmann/json.hpp>
 
 #include <fstream>
+#include <iostream>
 
 namespace sia {
 
 
-static void read_file(std::string const & path, std::vector<uint8_t> & buffer);
-static void write_file(std::string const & path, std::vector<uint8_t> const & buffer);
+static void read_file(ghc::filesystem::path const & path, std::vector<uint8_t> & buffer);
+static void write_file(ghc::filesystem::path const & path, std::vector<uint8_t> const & buffer);
+static void write_files(ghc::filesystem::path const & path, skynet::response & response, skynet::response::subfile & file);
 static std::string uploadToField(std::vector<skynet::upload_data> const & files, std::string const & filename, std::string const & url, std::string const & field, std::chrono::milliseconds timeout);
 static std::string trimSiaPrefix(std::string const & skylink);
 static std::string trimTrailingSlash(std::string const & url);
@@ -84,14 +87,26 @@ std::string skynet::upload_file(std::string const & path, std::string filename, 
 	return upload(data, timeout);
 }
 
-/*
-void skynet::upload_directory(std::string const & path, std::string const & filename)
+std::string skynet::upload_directory(std::string const & path, std::string filename, std::chrono::milliseconds timeout)
 {
 	if (!filename.size()) {
 		filename = path;
 	}
+
+	std::vector<upload_data> uploads;
+	for (auto & subpath : ghc::filesystem::recursive_directory_iterator(path)) {
+		if (subpath.is_directory()) { continue; }
+		if (!subpath.is_regular_file()) {
+			std::cerr << "Warning: skipping non-regular-file " << subpath << std::endl;
+			continue;
+		}
+		uploads.emplace_back(subpath.path(), std::vector<uint8_t>());
+		read_file(subpath.path(), uploads.back().data);
+		std::cerr << uploads.back().filename << ": " << uploads.back().data.size() << std::endl;
+	}
+
+	return upload(filename, uploads, timeout);
 }
-*/
 
 std::string skynet::upload(upload_data const & file, std::chrono::milliseconds timeout)
 {
@@ -151,11 +166,24 @@ skynet::response skynet::query(std::string const & skylink, std::chrono::millise
 	return result;
 }
 
-skynet::response skynet::download_file(std::string const & path, std::string const & skylink, std::chrono::milliseconds timeout)
+skynet::response skynet::download_file(std::string const & skylink, std::string path, std::chrono::milliseconds timeout)
 { 
 	response result = download(skylink, {}, timeout);
+
+	if (path.size() == 0) { path = result.filename; }
 	
 	write_file(path, result.data);
+
+	return result;
+}
+
+skynet::response skynet::download_directory(std::string const & skylink, std::string path, std::chrono::milliseconds timeout)
+{ 
+	response result = download(skylink, {}, timeout);
+
+	if (path.size() == 0) { path = result.filename; }
+	
+	write_files(path + "/" + result.filename, result, result.metadata);
 
 	return result;
 }
@@ -258,11 +286,11 @@ std::string extractContentDispositionFilename(std::string const & content_dispos
 	return { content_disposition.begin() + start, content_disposition.begin() + end };
 }
 
-static void read_file(std::string const & path, std::vector<uint8_t> & buffer)
+static void read_file(ghc::filesystem::path const & path, std::vector<uint8_t> & buffer)
 {
 	std::ifstream file(path.c_str(), std::ios::in | std::ios::binary | std::ios::ate);
 
-	if (!file.is_open()) { throw std::runtime_error("Failed to open " + path); }
+	if (!file.is_open()) { throw std::runtime_error("Failed to open " + std::string(path)); }
 
 	std::streamsize size = file.tellg();
 	file.seekg(0, std::ios::beg);
@@ -270,18 +298,32 @@ static void read_file(std::string const & path, std::vector<uint8_t> & buffer)
 	buffer.resize(size);
 	file.read((char*)buffer.data(), size * sizeof(uint8_t) / sizeof(char));
 
-	if (file.fail()) { throw std::runtime_error("Failed to read contents of " + path); }
+	if (file.fail()) { throw std::runtime_error("Failed to read contents of " + std::string(path)); }
 }
 
-static void write_file(std::string const & path, std::vector<uint8_t> const & buffer)
+static void write_file(ghc::filesystem::path const & path, std::vector<uint8_t> const & buffer)
 {
 	std::ofstream file(path.c_str(), std::ios::out | std::ios::binary);
 
-	if (!file.is_open()) { throw std::runtime_error("Failed to open " + path); }
+	if (!file.is_open()) { throw std::runtime_error("Failed to open " + std::string(path)); }
 
 	file.write((char*)buffer.data(), buffer.size() * sizeof(uint8_t) / sizeof(char));
 
-	if (file.fail()) { throw std::runtime_error("Failed to write contents of " + path); }
+	if (file.fail()) { throw std::runtime_error("Failed to write contents of " + std::string(path)); }
+}
+
+static void write_files(ghc::filesystem::path const & path, skynet::response & response, skynet::response::subfile & file)
+{
+	if (file.subfiles.size()) {
+		if (!ghc::filesystem::create_directories(path)) {
+			throw std::runtime_error("Failed to create directory " + std::string(path));
+		}
+		for (auto & subfile : file.subfiles) {
+			write_files(std::string(path) + "/" + subfile.first, response, subfile.second);
+		}
+	} else {
+		write_file(path, std::vector<uint8_t>(response.data.begin() + file.offset, response.data.begin() + file.offset + file.len));
+	}
 }
 
 }

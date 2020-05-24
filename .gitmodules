@@ -4,3 +4,6 @@
 [submodule "external/json"]
 	path = dependencies/json
 	url = https://github.com/nlohmann/json
+[submodule "dependencies/filesystem"]
+	path = dependencies/filesystem
+	url = https://github.com/gulrak/filesystem.git
