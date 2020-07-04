@@ -11,7 +11,7 @@ namespace sia {
 class skynet_multiportal {
 public:
 
-	skynet_multiportal(std::chrono::milliseconds timeout = std::chrono::milliseconds(10000));
+	skynet_multiportal(std::chrono::milliseconds timeout = std::chrono::milliseconds(10000), bool do_not_set_up_portals = false);
 
 	enum transfer_kind {
 		download = 0,
@@ -36,7 +36,7 @@ public:
 		struct metric {
 			double speed = 0;
 			unsigned long long data = 0;
-			std::chrono::steady_clock::duration time;
+			std::chrono::steady_clock::duration time = std::chrono::steady_clock::duration(0);
 			std::mutex mutex;
 			std::chrono::steady_clock::time_point last_start_time;
 		} metrics[transfer_kind_count];

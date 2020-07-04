@@ -5,8 +5,10 @@
 
 namespace sia {
 
-skynet_multiportal::skynet_multiportal(std::chrono::milliseconds timeout)
+skynet_multiportal::skynet_multiportal(std::chrono::milliseconds timeout, bool do_not_set_up_portals)
 {
+	if (do_not_set_up_portals) { return; }
+
 	for (auto portal : skynet::portals()) {
 		ensure_portal(portal);
 	}
