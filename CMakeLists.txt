@@ -7,9 +7,11 @@ set (SIASKYNETPP_INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/include CACHE INTERNAL
 
 add_subdirectory (dependencies)
 
+find_package(Threads REQUIRED)
+
 add_library (${SIASKYNETPP_LIBRARIES} source/siaskynet.cpp source/siaskynet_multiportal.cpp "${SIASKYNETPP_INCLUDE_DIRS}/siaskynet.hpp" "${SIASKYNETPP_INCLUDE_DIRS}/siaskynet_multiportal.hpp")
 
-target_link_libraries (${SIASKYNETPP_LIBRARIES} ${CPR_LIBRARIES})
+target_link_libraries (${SIASKYNETPP_LIBRARIES} ${CPR_LIBRARIES} Threads::Threads)
 target_include_directories (${SIASKYNETPP_LIBRARIES} PRIVATE ${JSON_INCLUDE_DIRS} PRIVATE ${CPR_INCLUDE_DIRS} PRIVATE ${SIASKYNETPP_INCLUDE_DIRS})
 
 install (TARGETS ${SIASKYNETPP_LIBRARIES} RUNTIME DESTINATION bin LIBRARY DESTINATION lib ARCHIVE DESTINATION lib)

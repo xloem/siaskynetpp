@@ -1,4 +1,4 @@
-#include <siaskynet.hpp>
+#include <siaskynet_multiportal.hpp>
 
 #include <iostream>
 
@@ -7,8 +7,10 @@ void dump_response(sia::skynet::response & response, bool content);
 
 int main()
 {
-	sia::skynet portal;
-	std::cout << "portal: " << portal.options.url << std::endl;
+	sia::skynet_multiportal multiportal;
+	auto transfer = multiportal.begin_transfer(sia::skynet_multiportal::upload);
+	sia::skynet portal(transfer.portal);
+	std::cout << "uploading to portal: " << portal.options.url << std::endl;
 
 	//auto skylink = portal.upload("hello.txt", "hello");
 	auto skylink = portal.upload("hello-folder",
@@ -16,20 +18,38 @@ int main()
 			{"hello.txt", "hello"},
 			{"world.txt", "world", "text/example.type.sub-type+etc;mode=0640;owner=1000"}
 		});
+	multiportal.end_transfer(transfer, 12 + 9 + 5 + 9 + 5 + 51);
 
 	std::cout << "hello-folder: " << skylink << std::endl;
+
+	transfer = multiportal.begin_transfer(sia::skynet_multiportal::download);
+	portal.options = transfer.portal;
+	std::cout << "querying portal: " << portal.options.url << std::endl;
 
 	//auto response = portal.download(skylink + "/hello.txt");
 	auto response = portal.query(skylink);
 
+	multiportal.end_transfer(transfer, 12);
+
 	dump_response(response, true);
 
+	transfer = multiportal.begin_transfer(sia::skynet_multiportal::upload);
+	portal.options = transfer.portal;
+
+	std::cout << "uploading to portal: " << portal.options.url << std::endl;
 	std::string example_filename = "siaskynetpp_example";
 	skylink = portal.upload_file(example_filename);
+
+	multiportal.end_transfer(transfer, 3000000);
 	
 	std::cout << example_filename << ": " << skylink << std::endl;
 
+	transfer = multiportal.begin_transfer(sia::skynet_multiportal::download);
+
+	std::cout << "downloading from portal: " << portal.options.url << std::endl;
 	response = portal.download_file(example_filename + ".fromskynet", skylink);
+
+	multiportal.end_transfer(transfer, 3000000);
 
 	dump_response(response, false);
 
