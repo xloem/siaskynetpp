@@ -4,6 +4,7 @@
 #include <nlohmann/json.hpp>
 
 #include <fstream>
+#include <unordered_set>
 
 namespace sia {
 
@@ -24,6 +25,7 @@ skynet::portal_options skynet::default_options()
 
 std::vector<skynet::portal_options> skynet::portals()
 {
+	std::unordered_set<std::string> urls;
 	std::vector<skynet::portal_options> result;
 	auto response = cpr::Get(cpr::Url{"https://siastats.info/dbs/skynet_current.json"});
 	std::string text;
@@ -40,6 +42,16 @@ std::vector<skynet::portal_options> skynet::portals()
 			fileFieldname: "file",
 			directoryFileFieldname: "files[]"
 		});
+		urls.insert(result.back().url);
+	}
+	if (!urls.count("https://siasky.dev")) {
+		result.emplace_back(portal_options{
+			url: "https://siasky.dev",
+			uploadPath: "/skynet/skyfile",
+			fileFieldname: "file",
+			directoryFileFieldname: "files[]"
+		});
+		urls.insert(result.back().url);
 	}
 	return result;
 }
