@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 
+namespace cpr { class Session; }
+
 namespace sia {
 
 class skynet {
@@ -48,6 +50,8 @@ public:
 
 	skynet();
 	skynet(portal_options const & options);
+	~skynet();
+
 	portal_options options;
 
 	response query(std::string const & skylink, std::chrono::milliseconds timeout = std::chrono::milliseconds(0));
@@ -63,6 +67,9 @@ public:
 	std::string upload(std::string const & filename, std::vector<upload_data> const & files, std::chrono::milliseconds timeout = std::chrono::milliseconds(0));
 	std::string upload_file(std::string const & path, std::string filename = "", std::chrono::milliseconds timeout = std::chrono::milliseconds(0));
 	//TODO: void upload_directory(std::string const & path, std::chrono::milliseconds timeout = std::chrono::milliseconds(0));
+
+private:
+	 cpr::Session * session;
 };
 
 }

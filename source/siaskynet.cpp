@@ -11,7 +11,7 @@ namespace sia {
 
 static void read_file(std::string const & path, std::vector<uint8_t> & buffer);
 static void write_file(std::string const & path, std::vector<uint8_t> const & buffer);
-static std::string uploadToField(std::vector<skynet::upload_data> const & files, std::string const & filename, std::string const & url, std::string const & field, std::chrono::milliseconds timeout);
+static std::string uploadToField(std::vector<skynet::upload_data> const & files, std::string const & filename, cpr::Session *, std::string const & field, std::chrono::milliseconds timeout);
 static std::string trimSiaPrefix(std::string const & skylink);
 static std::string trimTrailingSlash(std::string const & url);
 static skynet::response::subfile parseCprResponse(cpr::Response & response);
@@ -57,12 +57,19 @@ std::vector<skynet::portal_options> skynet::portals()
 }
 
 skynet::skynet()
-: options(default_options())
+: options(default_options()),
+  session(new cpr::Session())
 { }
 
 skynet::skynet(skynet::portal_options const & options)
-: options(options)
+: options(options),
+  session(new cpr::Session())
 { }
+
+skynet::~skynet()
+{
+	delete session;
+}
 
 std::string trimSiaPrefix(std::string const & skylink)
 {
@@ -114,21 +121,21 @@ void skynet::upload_directory(std::string const & path, std::string const & file
 
 std::string skynet::upload(upload_data const & file, std::chrono::milliseconds timeout)
 {
-	auto url = cpr::Url{trimTrailingSlash(options.url) + "/" + trimLeadingSlash(trimTrailingSlash(options.uploadPath))};
+	session->SetUrl(cpr::Url{trimTrailingSlash(options.url) + "/" + trimLeadingSlash(trimTrailingSlash(options.uploadPath))});
 
-	return uploadToField({file}, file.filename, url, options.fileFieldname, timeout);
+	return uploadToField({file}, file.filename, session, options.fileFieldname, timeout);
 }
 
 std::string skynet::upload(std::string const & filename, std::vector<skynet::upload_data> const & files, std::chrono::milliseconds timeout)
 {
-	auto url = cpr::Url{trimTrailingSlash(options.url) + "/" + trimLeadingSlash(trimTrailingSlash(options.uploadPath))};
+	session->SetUrl(cpr::Url{trimTrailingSlash(options.url) + "/" + trimLeadingSlash(trimTrailingSlash(options.uploadPath))});
 
-	return uploadToField(files, filename, url, options.directoryFileFieldname, timeout);
+	return uploadToField(files, filename, session, options.directoryFileFieldname, timeout);
 }
 
-std::string uploadToField(std::vector<skynet::upload_data> const & files, std::string const & filename, std::string const & url, std::string const & field, std::chrono::milliseconds timeout)
+std::string uploadToField(std::vector<skynet::upload_data> const & files, std::string const & filename, cpr::Session * session, std::string const & field, std::chrono::milliseconds timeout)
 {
-	auto parameters = cpr::Parameters{{"filename", filename}};
+	session->SetParameters({{"filename", filename}});
 
 	cpr::Multipart uploads{};
 
@@ -136,7 +143,11 @@ std::string uploadToField(std::vector<skynet::upload_data> const & files, std::s
 		uploads.parts.emplace_back(field, cpr::Buffer{file.data.begin(), file.data.end(), file.filename}, file.contenttype);
 	}
 
-	auto response = cpr::Post(url, parameters, uploads, cpr::Timeout{timeout});
+	session->SetMultipart(uploads);
+	session->SetTimeout(timeout);
+	auto response = session->Post();
+	session->SetMultipart({});
+
 	if (response.error) {
 		throw std::runtime_error(response.error.message);
 	} else if (response.status_code != 200) {
@@ -152,9 +163,11 @@ std::string uploadToField(std::vector<skynet::upload_data> const & files, std::s
 
 skynet::response skynet::query(std::string const & skylink, std::chrono::milliseconds timeout)
 {
-	std::string url = trimTrailingSlash(options.url) + "/" + trimSiaPrefix(skylink);
+	session->SetUrl(trimTrailingSlash(options.url) + "/" + trimSiaPrefix(skylink));
+	session->SetParameters({{"format","concat"}});
+	session->SetTimeout(timeout);
+	auto response = session->Head();
 
-	auto response = cpr::Head(url, cpr::Parameters{{"format","concat"}}, cpr::Timeout{timeout});
 	if (response.error) {
 		throw std::runtime_error(response.error.message);
 	} else if (response.status_code != 200) {
@@ -182,9 +195,8 @@ skynet::response skynet::download_file(std::string const & path, std::string con
 skynet::response skynet::download(std::string const & skylink, std::initializer_list<std::pair<size_t, size_t>> ranges, std::chrono::milliseconds timeout)
 {
 	skynet::response result;
-	std::string url = trimTrailingSlash(options.url) + "/" + trimSiaPrefix(skylink);
+	session->SetUrl(trimTrailingSlash(options.url) + "/" + trimSiaPrefix(skylink));
 
-	cpr::Header headers;
 	if (ranges.size()) {
 		std::string header_content;
 		bool first = true;
@@ -198,10 +210,15 @@ skynet::response skynet::download(std::string const & skylink, std::initializer_
 			header_content += std::to_string(range.first) + "-" + std::to_string(range.first + range.second - 1);
 			first = false;
 		}
-		headers = cpr::Header{{"Range", header_content}};
+		session->SetHeader({{"Range", header_content}});
 	}
+	session->SetParameters({{"format","concat"}});
+	session->SetTimeout(timeout);
 
-	auto response = cpr::Get(url, cpr::Parameters{{"format","concat"}}, headers, cpr::Timeout{timeout});
+	auto response = session->Get();
+
+	session->SetHeader({});
+
 	if (response.error) {
 		throw std::runtime_error(response.error.message);
 	} else if (response.status_code != 200) {
