@@ -19,7 +19,7 @@ skynet_multiportal::skynet_multiportal(std::chrono::milliseconds timeout, bool d
 	// the constructor returns.
 
 	std::unique_lock<std::mutex> lock(mutex);
-	bool transferred_successfully[transfer_kind_count];
+	bool transferred_successfully[transfer_kind_count] = {false,false};
 
 	std::string filename = "test";
 	std::string data(1024, (char)0);
@@ -29,29 +29,25 @@ skynet_multiportal::skynet_multiportal(std::chrono::milliseconds timeout, bool d
 		auto & portal = portal_entry.second;
 		
 		std::thread([&]() {
-			std::lock_guard<std::mutex> lock(portal.metrics[download].mutex);
-	
-			auto transfer = begin_transfer(download);
+			auto transfer = begin_transfer(download, portal.portal);
 	
 			skynet downloader(portal.portal);
 			try {
 				auto result = downloader.download("sia://AAA2s82WUW1c73RYIcAb3PnBPHcFdHZ7XfleMkrDnueCXQ/test", {}, timeout);
 				end_transfer(transfer, result.filename.size() + result.data.size());
 				transferred_successfully[download] = true;
-			} catch (std::runtime_error) {
+			} catch (...) {
 				end_transfer(transfer, 1);
 			}
 		}).detach();
 		std::thread([&]() {
-			std::lock_guard<std::mutex> lock(portal.metrics[upload].mutex);
-	
-			auto transfer = begin_transfer(upload);
+			auto transfer = begin_transfer(upload, portal.portal);
 			skynet uploader(portal.portal);
 			try {
 				uploader.upload(filename, data, {}, timeout);
 				end_transfer(transfer, filename.size() + data.size());
 				transferred_successfully[upload] = true;
-			} catch (std::runtime_error) {
+			} catch (...) {
 				end_transfer(transfer, 1);
 			}
 		}).detach();
@@ -78,12 +74,23 @@ skynet_multiportal::portal_metrics const & skynet_multiportal::metrics(std::stri
 	return portals[url];
 }
 
-skynet_multiportal::transfer skynet_multiportal::begin_transfer(transfer_kind kind)
+skynet_multiportal::transfer skynet_multiportal::begin_transfer(transfer_kind kind, skynet::portal_options portal)
 {
+	if (portal.url.size()) {
+		ensure_portal(portal);
+	}
+	std::unique_lock<std::mutex> lock(mutex);
+	if (portal.url.size()) {
+		portals[portal.url].metrics[kind].mutex.lock();
+		return {
+			kind,
+			portal,
+			std::chrono::steady_clock::now()
+		};
+	}
 	portal_metrics * best_portal = 0;
 	portal_metrics::metric * best_metric = 0;
 	double best_speed = 0;
-	std::unique_lock<std::mutex> lock(mutex);
 	while (!best_portal) {
 		for (auto & portal_entry : portals) {
 			auto & portal = portal_entry.second;

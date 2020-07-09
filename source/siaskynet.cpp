@@ -76,9 +76,16 @@ std::string trimSiaPrefix(std::string const & skylink)
 std::string trimTrailingSlash(std::string const & url)
 {
 	if (url[url.size() - 1] == '/') {
-		std::string result = url;
-		result.resize(result.size() - 1);
-		return result;
+		return {url.data(), url.size() - 1};
+	} else {
+		return url;
+	}
+}
+
+std::string trimLeadingSlash(std::string const & url)
+{
+	if (url[0] == '/') {
+		return {url.data() + 1, url.size() - 1};
 	} else {
 		return url;
 	}
@@ -107,14 +114,14 @@ void skynet::upload_directory(std::string const & path, std::string const & file
 
 std::string skynet::upload(upload_data const & file, std::chrono::milliseconds timeout)
 {
-	auto url = cpr::Url{trimTrailingSlash(options.url) + trimTrailingSlash(options.uploadPath)};
+	auto url = cpr::Url{trimTrailingSlash(options.url) + "/" + trimLeadingSlash(trimTrailingSlash(options.uploadPath))};
 
 	return uploadToField({file}, file.filename, url, options.fileFieldname, timeout);
 }
 
 std::string skynet::upload(std::string const & filename, std::vector<skynet::upload_data> const & files, std::chrono::milliseconds timeout)
 {
-	auto url = cpr::Url{trimTrailingSlash(options.url) + "/" + trimTrailingSlash(options.uploadPath)};
+	auto url = cpr::Url{trimTrailingSlash(options.url) + "/" + trimLeadingSlash(trimTrailingSlash(options.uploadPath))};
 
 	return uploadToField(files, filename, url, options.directoryFileFieldname, timeout);
 }
@@ -227,12 +234,20 @@ skynet::response::subfile parse_subfile(size_t & offset, nlohmann::json const & 
 	metadata.filename = value["filename"].get<std::string>();
 
 	metadata.offset = offset;
-	offset += metadata.len;
+	offset += metadata.len; // this adds to suboffset when recursively called
 
-	if (!value.contains("subfiles")) { return metadata; }
+	if (!value.contains("subfiles")) {
+		return metadata;
+	}
 
 	for (auto & subfile : value["subfiles"].items()) {
 		metadata.subfiles.emplace_back(subfile.key(), parse_subfile(suboffset, subfile.value()));
+	}
+
+	if (suboffset > offset) {
+		// this is intended to fix those times when content-length is not provided and the outermost metadata.len is 0
+		metadata.len += suboffset - offset;
+		offset = suboffset;
 	}
 
 	return metadata;
@@ -242,7 +257,8 @@ skynet::response::subfile parseCprResponse(cpr::Response & cpr)
 {
 	auto & raw_json = cpr.header["skynet-file-metadata"];
 	auto parsed_json = nlohmann::json::parse(raw_json);
-	parsed_json["len"] = std::stoul(cpr.header["content-length"]);
+	auto len = cpr.header["content-length"];
+	parsed_json["len"] = len.size() ? std::stoul(cpr.header["content-length"]) : 0;
 	parsed_json["contenttype"] = cpr.header["content-type"];
 
 	size_t offset = 0;
