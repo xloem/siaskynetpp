@@ -19,7 +19,7 @@ skynet_multiportal::skynet_multiportal(std::chrono::milliseconds timeout, bool d
 	// the constructor returns.
 
 	std::unique_lock<std::mutex> lock(mutex);
-	bool transferred_successfully[transfer_kind_count] = {false,false};
+	std::shared_ptr<std::pair<bool,bool>> transferred_successfully(new std::pair<bool,bool>(false, false));
 
 	std::string filename = "test";
 	std::string data(1024, (char)0);
@@ -28,25 +28,25 @@ skynet_multiportal::skynet_multiportal(std::chrono::milliseconds timeout, bool d
 	for (auto & portal_entry : portals) {
 		auto & portal = portal_entry.second;
 		
-		std::thread([&]() {
+		std::thread([this, &portal, timeout, data, transferred_successfully]() {
 			auto transfer = begin_transfer(download, portal.portal);
 	
 			skynet downloader(portal.portal);
 			try {
 				auto result = downloader.download("sia://AAA2s82WUW1c73RYIcAb3PnBPHcFdHZ7XfleMkrDnueCXQ/test", {}, timeout);
 				end_transfer(transfer, result.filename.size() + result.data.size());
-				transferred_successfully[download] = true;
+				transferred_successfully->first = true;
 			} catch (...) {
 				end_transfer(transfer, 1);
 			}
 		}).detach();
-		std::thread([&]() {
+		std::thread([this, &portal, timeout, data, transferred_successfully, filename]() {
 			auto transfer = begin_transfer(upload, portal.portal);
 			skynet uploader(portal.portal);
 			try {
 				uploader.upload(filename, data, {}, timeout);
 				end_transfer(transfer, filename.size() + data.size());
-				transferred_successfully[upload] = true;
+				transferred_successfully->second = true;
 			} catch (...) {
 				end_transfer(transfer, 1);
 			}
@@ -54,8 +54,8 @@ skynet_multiportal::skynet_multiportal(std::chrono::milliseconds timeout, bool d
 	}
 
 	bool success = true;
-	success &= transferred[download].wait_for(lock, timeout, [&] { return transferred_successfully[download]; });
-	success &= transferred[upload].wait_for(lock, timeout, [&] { return transferred_successfully[upload]; });
+	success &= transferred[download].wait_for(lock, timeout, [&] { return transferred_successfully->first; });
+	success &= transferred[upload].wait_for(lock, timeout, [&] { return transferred_successfully->second; });
 
 	// TODO: process success?  is false if no portal worked within timeout.
 	// 	begin_transfer will try nonworking portals until a working
