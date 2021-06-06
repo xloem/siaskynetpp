@@ -40,8 +40,8 @@ public:
 
 		static char hex[] = {'0','1','2','3','4','5','6','7','8','9','a','b','c','d','e','f'};
 
-		for (int i = 0; i < size; ++ i) {
-			int j = i << 1;
+		for (unsigned int i = 0; i < size; ++ i) {
+			unsigned int j = i << 1;
 			result[j] = hex[bytes[i] >> 4];
 			result[j+1] = hex[bytes[i] & 0xf];
 		}

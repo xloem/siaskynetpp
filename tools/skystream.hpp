@@ -27,7 +27,7 @@ public:
 			{"content", {
 				{"spans",{
 					//{"real", {
-						{"time", {{"start", time()}, {"end", time()}}},
+						{"time", {{"start", now}, {"end", now}}},
 						{"index", {{"start", 0}, {"end", 0}}},
 						{"bytes", {{"start", 0}, {"end", 0}}}
 					//}}
@@ -59,6 +59,7 @@ public:
 
 		auto begin = data.begin() + offset - content_start;
 		auto end = data.begin() + metadata_content["bounds"]["bytes"]["end"] - content_start;
+		(void)flow;
 		return {begin, end};
 	}
 
@@ -123,7 +124,7 @@ public:
 		}
 
 		nlohmann::json lookup_nodes = nlohmann::json::array();
-		size_t depth = 0;
+		//size_t depth = 0;
 		nlohmann::json new_lookup_node;
 		node preceding;
 		lookup_nodes.clear();
@@ -422,6 +423,8 @@ private:
 	nlohmann::json lookup_nodes(node & source, nlohmann::json & bounds)
 	{
 		// to do this right, consider that source's content may be in the middle of its lookups.  so you want to put it in the right spot.
+		(void)source;
+		(void)bounds;
 		return {}; // STUB
 	}
 

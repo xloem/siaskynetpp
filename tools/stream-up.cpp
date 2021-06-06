@@ -19,6 +19,9 @@ int main(int argc, char **argv)
 
 	ssize_t size;
 
+	(void)argc;
+	(void)argv;
+
 	while ((size = read(0, data.data(), data.size()))) {
 		if (size < 0) {
 			perror("read");

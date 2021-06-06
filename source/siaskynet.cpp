@@ -248,7 +248,9 @@ skynet::response::subfile parse_subfile(size_t & offset, nlohmann::json const & 
 	skynet::response::subfile metadata;
 	metadata.contenttype = value["contenttype"].get<std::string>();
 	metadata.len = value["len"].get<size_t>();
-	metadata.filename = value["filename"].get<std::string>();
+	if (value.contains("filename")) {
+		metadata.filename = value["filename"].get<std::string>();
+	}
 
 	metadata.offset = offset;
 	offset += metadata.len; // this adds to suboffset when recursively called
@@ -273,7 +275,7 @@ skynet::response::subfile parse_subfile(size_t & offset, nlohmann::json const & 
 skynet::response::subfile parseCprResponse(cpr::Response & cpr)
 {
 	auto & raw_json = cpr.header["skynet-file-metadata"];
-	auto parsed_json = nlohmann::json::parse(raw_json);
+	auto parsed_json = raw_json.empty() ? nlohmann::json({}) : nlohmann::json::parse(raw_json);
 	auto len = cpr.header["content-length"];
 	parsed_json["len"] = len.size() ? std::stoul(cpr.header["content-length"]) : 0;
 	parsed_json["contenttype"] = cpr.header["content-type"];
