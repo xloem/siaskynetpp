@@ -62,6 +62,9 @@ public:
 	// add a portal to the list, or update its options
 	void ensure_portal(skynet::portal_options portal);
 
+	// transfer a little data over all the portals to get metrics, returns if any succeeded
+	bool measure_portals(std::chrono::milliseconds timeout = std::chrono::milliseconds(10000));
+
 	// get metrics for a portal by url
 	portal_metrics const & metrics(std::string url);
 

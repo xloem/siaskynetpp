@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <thread>
+#include <random>
 
 namespace sia {
 
@@ -13,53 +14,69 @@ skynet_multiportal::skynet_multiportal(std::chrono::milliseconds timeout, bool d
 		ensure_portal(portal);
 	}
 
-	// now each portal is tried in parallel, and data is filled
+	measure_portals(timeout);
+}
+
+bool skynet_multiportal::measure_portals(std::chrono::milliseconds timeout)
+{
+	// each portal is tried in parallel, and data is filled
 	// in as results come in.
 	// once there is both an upload and download portal known to work,
 	// the constructor returns.
 
 	std::unique_lock<std::mutex> lock(mutex);
+	std::condition_variable transferred;
 	std::shared_ptr<std::pair<bool,bool>> transferred_successfully(new std::pair<bool,bool>(false, false));
 
 	std::string filename = "test";
-	std::string data(1024, (char)0);
+	std::string data; data.reserve(1024); data.resize(1024);
+	{
+		std::random_device rd;
+		std::uniform_int_distribution<char> dist(-128,127);
+		for (char & d : data) {
+			d = dist(rd);
+		}
+	}
 
 
 	for (auto & portal_entry : portals) {
 		auto & portal = portal_entry.second;
 		
-		std::thread([this, &portal, timeout, data, transferred_successfully]() {
+		std::thread([this, &portal, timeout, data, &transferred, transferred_successfully]() {
 			auto transfer = begin_transfer(download, portal.portal);
 	
 			skynet downloader(portal.portal);
 			try {
 				auto result = downloader.download("sia://AAA2s82WUW1c73RYIcAb3PnBPHcFdHZ7XfleMkrDnueCXQ/test", {}, timeout);
 				end_transfer(transfer, result.filename.size() + result.data.size());
+				std::unique_lock<std::mutex> lock(mutex);
 				transferred_successfully->first = true;
+				transferred.notify_all();
 			} catch (...) {
 				end_transfer(transfer, 1);
 			}
 		}).detach();
-		std::thread([this, &portal, timeout, data, transferred_successfully, filename]() {
+		std::thread([this, &portal, timeout, data, &transferred, transferred_successfully, filename]() {
 			auto transfer = begin_transfer(upload, portal.portal);
 			skynet uploader(portal.portal);
 			try {
 				uploader.upload(filename, data, {}, timeout);
 				end_transfer(transfer, filename.size() + data.size());
+				std::unique_lock<std::mutex> lock(mutex);
 				transferred_successfully->second = true;
+				transferred.notify_all();
 			} catch (...) {
 				end_transfer(transfer, 1);
 			}
 		}).detach();
 	}
 
-	bool success = true;
-	success &= transferred[download].wait_for(lock, timeout, [&] { return transferred_successfully->first; });
-	success &= transferred[upload].wait_for(lock, timeout, [&] { return transferred_successfully->second; });
-
-	// TODO: process success?  is false if no portal worked within timeout.
-	// 	begin_transfer will try nonworking portals until a working
-	// 	one responds.
+	// false if timeout is hit without success, hopefully
+	return transferred.wait_for(
+		lock, timeout, [&] {
+			return transferred_successfully->first && transferred_successfully->second;
+		}
+	);
 }
 
 void skynet_multiportal::ensure_portal(skynet::portal_options portal)
