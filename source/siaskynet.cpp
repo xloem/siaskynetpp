@@ -11,7 +11,7 @@ namespace sia {
 
 static void read_file(std::string const & path, std::vector<uint8_t> & buffer);
 static void write_file(std::string const & path, std::vector<uint8_t> const & buffer);
-static std::string uploadToField(std::vector<skynet::upload_data> const & files, std::string const & filename, cpr::Session *, std::string const & field, std::chrono::milliseconds timeout);
+static std::string uploadToField(std::vector<skynet::upload_data> && files, std::string const & filename, cpr::Session *, std::string const & field, std::chrono::milliseconds timeout);
 static std::string trimSiaPrefix(std::string const & skylink);
 static std::string trimTrailingSlash(std::string const & url);
 static skynet::response::subfile parseCprResponse(cpr::Response & response);
@@ -107,7 +107,7 @@ std::string skynet::upload_file(std::string const & path, std::string filename, 
 	upload_data data(filename, std::vector<uint8_t>());
 	read_file(path, data.data);
 
-	return upload(data, timeout);
+	return upload(std::forward<upload_data>(data), timeout);
 }
 
 /*
@@ -119,28 +119,28 @@ void skynet::upload_directory(std::string const & path, std::string const & file
 }
 */
 
-std::string skynet::upload(upload_data const & file, std::chrono::milliseconds timeout)
+std::string skynet::upload(upload_data && file, std::chrono::milliseconds timeout)
 {
 	session->SetUrl(cpr::Url{trimTrailingSlash(options.url) + "/" + trimLeadingSlash(trimTrailingSlash(options.uploadPath))});
 
 	return uploadToField({file}, file.filename, session, options.fileFieldname, timeout);
 }
 
-std::string skynet::upload(std::string const & filename, std::vector<skynet::upload_data> const & files, std::chrono::milliseconds timeout)
+std::string skynet::upload(std::string const & filename, std::vector<skynet::upload_data> && files, std::chrono::milliseconds timeout)
 {
 	session->SetUrl(cpr::Url{trimTrailingSlash(options.url) + "/" + trimLeadingSlash(trimTrailingSlash(options.uploadPath))});
 
-	return uploadToField(files, filename, session, options.directoryFileFieldname, timeout);
+	return uploadToField(std::forward<std::vector<skynet::upload_data>>(files), filename, session, options.directoryFileFieldname, timeout);
 }
 
-std::string uploadToField(std::vector<skynet::upload_data> const & files, std::string const & filename, cpr::Session * session, std::string const & field, std::chrono::milliseconds timeout)
+std::string uploadToField(std::vector<skynet::upload_data> && files, std::string const & filename, cpr::Session * session, std::string const & field, std::chrono::milliseconds timeout)
 {
 	session->SetParameters({{"filename", filename}});
 
 	cpr::Multipart uploads{};
 
 	for (auto & file : files) {
-		uploads.parts.emplace_back(field, cpr::Buffer{file.data.begin(), file.data.end(), file.filename}, file.contenttype);
+		uploads.parts.emplace_back(field, cpr::Buffer(file.data.begin(), file.data.end(), std::forward<std::string>(file.filename)), file.contenttype);
 	}
 
 	session->SetMultipart(uploads);
@@ -233,6 +233,11 @@ skynet::response skynet::download(std::string const & skylink, std::initializer_
 	result.portal = options;
 	result.filename = extractContentDispositionFilename(response.header["content-disposition"]);
 	result.metadata = parseCprResponse(response);
+	uint8_t bytes[256];
+	memset(bytes, 0, sizeof(bytes));
+	for (size_t w = 0; w < response.text.size(); w ++) {
+		bytes[response.text[w]] ++;
+	}
 	result.data = std::vector<uint8_t>(response.text.begin(), response.text.end());
 	if (!ranges.size()) {
 		result.dataranges.emplace_back(0, result.metadata.len);
